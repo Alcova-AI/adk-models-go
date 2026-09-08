@@ -14,6 +14,8 @@
 
 - Default native Vercel HTTP client retries transient failures twice with cancellable backoff; supplied clients remain unchanged
 
+- Gemini gateway thinking levels use the lowercase encoding required by Vercel
+
 ### Changed
 
 - OpenAI minimal reasoning maps to `none` in both Responses and gateway options

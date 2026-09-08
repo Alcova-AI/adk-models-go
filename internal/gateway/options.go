@@ -5,6 +5,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
@@ -74,7 +75,7 @@ func familyOptions(f family.Family, r family.Reasoning, include bool, openAI adk
 	case family.Gemini:
 		thinking := make(map[string]any)
 		if r.Effort != "" {
-			thinking["thinkingLevel"] = r.Effort
+			thinking["thinkingLevel"] = strings.ToLower(r.Effort)
 		}
 		if include {
 			thinking["includeThoughts"] = true

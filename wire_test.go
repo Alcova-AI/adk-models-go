@@ -37,7 +37,7 @@ func TestGatewayReasoningWireMatrix(t *testing.T) {
 	}{
 		{"gpt-5.6-luna", "openai", []string{"", "none", "low", "medium", "high", "xhigh", "xhigh"}},
 		{"claude-test", "anthropic", []string{"", "low", "low", "medium", "high", "xhigh", "max"}},
-		{"gemini-test", "google", []string{"", "MINIMAL", "LOW", "MEDIUM", "HIGH", "HIGH", "HIGH"}},
+		{"gemini-test", "google", []string{"", "minimal", "low", "medium", "high", "high", "high"}},
 		{"glm-test", "zai", []string{"", "low", "low", "high", "max", "max", "max"}},
 	}
 	for _, adapter := range []string{"anthropic", "openai", "vercel"} {

@@ -1,6 +1,6 @@
 # adk-models-go implementation specification
 
-Revision 0.4 - approved decisions
+Revision 0.5 - approved decisions
 
 **Status:** Behaviour decisions, public-interface structure and the delivery requirements in this document are approved by Joel Beach. Unspecified field-level semantics still require a decision before affected implementation. Publishing is outside scope.
 
@@ -90,7 +90,7 @@ In the Anthropic column, disabled and adaptive refer to thinking mode. For expli
 
 - Without a supplied or explicitly caller-configured level, omit reasoning-level settings and use the model default. Do not introduce an implicit library effort default.
 
-- For Anthropic, an unset level omits both thinking and effort settings. Gemini standard levels pass through unchanged; custom XHIGH and MAX map to HIGH.
+- For Anthropic, an unset level omits both thinking and effort settings. Gemini standard levels keep their meaning; custom XHIGH and MAX map to HIGH. Vercel provider options encode those levels in lowercase, as required by the gateway (for example, HIGH becomes high).
 
 - Use family mappings only. Do not maintain model-specific capability exceptions. Return provider or route errors for rejected settings; do not retry at a different effort level.
 
@@ -140,9 +140,9 @@ The caller controls logging and tracing. The library must not automatically log 
 
 ## 10. Clients, retries and errors
 
-Anthropic and OpenAI retain caller-built SDK clients, preserving control over authentication, endpoints, HTTP behaviour and SDK options. Native Vercel accepts an optional HTTP client and defaults to http.DefaultClient.
+Anthropic and OpenAI retain caller-built SDK clients, preserving control over authentication, endpoints, HTTP behaviour and SDK options. Native Vercel accepts an optional HTTP client. With no supplied client, it creates a dedicated client with two retries for connection failures and HTTP 408, 409, 429 and 5xx. It respects x-should-retry and Retry-After up to 60 seconds, otherwise using exponential backoff with jitter. Cancellation stops retries; replayable bodies are recreated and discarded responses are closed. Supplied clients remain unchanged, and successful responses are never replayed.
 
-Preserve SDK-configured and adapter-specific retries, including conditions and limits. Share retry code only where behaviour is equivalent. Preserve provider-error meaning; do not add automatic format switching or fallback changes to reasoning, retention or caching.
+Preserve SDK-configured and Anthropic stream-overload retries, including conditions and limits. Share retry code only where behaviour is equivalent. Preserve provider-error meaning; do not add automatic format switching or fallback changes to reasoning, retention or caching.
 
 ## Verification and approval
 
