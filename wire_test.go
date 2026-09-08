@@ -301,3 +301,42 @@ func TestGatewayConfigurationSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func TestAdaptersIgnoreUnsupportedCacheControls(t *testing.T) {
+	for _, adapter := range []string{"anthropic", "openai", "vercel"} {
+		t.Run(adapter, func(t *testing.T) {
+			called := false
+			client := &http.Client{Transport: wireTransport(func(r *http.Request) (*http.Response, error) {
+				called = true
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					return nil, err
+				}
+				for _, field := range []string{"cache_control", "prompt_cache", "promptCache"} {
+					if strings.Contains(string(raw), field) {
+						t.Errorf("unsupported cache field %q sent: %s", field, raw)
+					}
+				}
+				return wireResponse(r, adapter, false), nil
+			})}
+			// Gemini has no supported explicit cache boundary in these adapters.
+			cfg := adkmodels.ModelConfig{CanonicalModel: "gemini-test", Vercel: &adkmodels.VercelConfig{}, PromptCaching: adkmodels.PromptCachingConfig{
+				Anthropic: adkmodels.AnthropicPromptCachingConfig{Mode: adkmodels.AnthropicPromptCacheManual, SystemInstruction: &adkmodels.AnthropicCacheBreakpoint{}, Tools: &adkmodels.AnthropicCacheBreakpoint{}, ConversationHistory: &adkmodels.AnthropicCacheBreakpoint{}},
+				OpenAI:    adkmodels.OpenAIPromptCachingConfig{Mode: adkmodels.OpenAIPromptCacheExplicit, Key: "cache-key", SystemInstruction: &adkmodels.OpenAICacheBreakpoint{}, ConversationHistory: &adkmodels.OpenAICacheBreakpoint{}},
+			}}
+			llm, err := wireModel(adapter, client, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}, Config: &genai.GenerateContentConfig{SystemInstruction: genai.NewContentFromText("system", "system")}}
+			for _, err := range llm.GenerateContent(t.Context(), request, false) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !called {
+				t.Fatal("request was not sent")
+			}
+		})
+	}
+}
