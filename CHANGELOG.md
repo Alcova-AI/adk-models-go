@@ -12,6 +12,8 @@
 - Migration guide and approved interface specification
 - Automatic release tag previews, tagging, and GitHub releases for merged pull requests
 
+- Default native Vercel HTTP client retries transient failures twice with cancellable backoff; supplied clients remain unchanged
+
 ### Changed
 
 - OpenAI minimal reasoning maps to `none` in both Responses and gateway options

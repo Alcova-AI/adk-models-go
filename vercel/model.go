@@ -65,7 +65,7 @@ func NewModel(cfg Config) (model.LLM, error) {
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Transport: &retryTransport{base: http.DefaultTransport, sleep: retrySleep}}
 	}
 	return &gatewayModel{apiKey: cfg.APIKey, canonicalModel: cfg.Model.CanonicalModel, requestModel: requestModel,
 		baseURL: normaliseBaseURL(cfg.BaseURL), httpClient: client, headers: cfg.Headers.Clone(), defaultMaxTokens: tokens,
