@@ -203,7 +203,7 @@ Migration requires configuration changes, not just new imports:
 
 For the Alcova backend, remove `lunaReasoningModel` and its factory hook from [PR #2322](https://github.com/Alcova-AI/alcova-backend/pull/2322) in the same migration. The shared OpenAI mapping translates `MINIMAL` to `none`; retaining the wrapper would incorrectly change it to `LOW` first.
 
-Existing adapter releases remain available during migration. See the [implementation specification](docs/specification.md) for the agreed contract.
+Existing adapter releases remain available during migration.
 
 ## Licence
 

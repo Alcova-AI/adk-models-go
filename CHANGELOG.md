@@ -9,7 +9,7 @@
 - Canonical model names separate from request routing aliases
 - Explicit Vercel gateway routing and retention controls, with validation of conflicting raw options
 - Streaming, tool calling, structured output, and preserved opaque reasoning state from the original adapters
-- Migration guide and approved interface specification
+- Migration guidance in the README
 - Automatic release tag previews, tagging, and GitHub releases for merged pull requests
 
 - Default native Vercel HTTP client retries transient failures twice with cancellable backoff; supplied clients remain unchanged
