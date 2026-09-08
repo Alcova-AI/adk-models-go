@@ -39,7 +39,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			}
 			next.Body = body
 		}
-		delay := retryDelay(response, attempt)
+		delay := retryDelay(response, attempt, time.Now())
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()
 		}
@@ -63,6 +63,9 @@ func retryable(req *http.Request, response *http.Response, err error) bool {
 	if response == nil {
 		return err != nil
 	}
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		return false
+	}
 	switch response.Header.Get("x-should-retry") {
 	case "true":
 		return true
@@ -73,14 +76,14 @@ func retryable(req *http.Request, response *http.Response, err error) bool {
 	return status == 408 || status == 409 || status == 429 || status >= 500
 }
 
-func retryDelay(response *http.Response, attempt int) time.Duration {
+func retryDelay(response *http.Response, attempt int, now time.Time) time.Duration {
 	if response != nil {
 		value := response.Header.Get("Retry-After")
 		if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds >= 0 && seconds <= 60 {
 			return time.Duration(seconds * float64(time.Second))
 		}
 		if date, err := http.ParseTime(value); err == nil {
-			delay := time.Until(date)
+			delay := date.Sub(now)
 			if delay >= 0 && delay <= time.Minute {
 				return delay
 			}

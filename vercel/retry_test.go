@@ -66,7 +66,7 @@ func TestRetryConnectionAndHeaders(t *testing.T) {
 		status int
 		header string
 		want   int
-	}{{"connection", 0, "", 3}, {"deny", 503, "false", 1}, {"allow", 400, "true", 3}} {
+	}{{"connection", 0, "", 3}, {"deny", 503, "false", 1}, {"allow", 400, "true", 3}, {"successful stream", 200, "true", 1}} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
 			tr := &retryTransport{sleep: func(context.Context, time.Duration) error { return nil }, base: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -114,20 +114,21 @@ func TestRetryCancellationAndNonReplayableBody(t *testing.T) {
 }
 
 func TestRetryDelay(t *testing.T) {
-	for _, value := range []string{"2", "0", time.Now().Add(10 * time.Second).UTC().Format(http.TimeFormat)} {
-		d := retryDelay(&http.Response{Header: http.Header{"Retry-After": []string{value}}}, 0)
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	for _, value := range []string{"2", "0", now.Add(10 * time.Second).UTC().Format(http.TimeFormat)} {
+		d := retryDelay(&http.Response{Header: http.Header{"Retry-After": []string{value}}}, 0, now)
 		if value == "2" && d != 2*time.Second {
 			t.Fatal(d)
 		}
 		if value == "0" && d != 0 {
 			t.Fatal(d)
 		}
-		if strings.Contains(value, "GMT") && (d < 8*time.Second || d > 10*time.Second) {
+		if strings.Contains(value, "GMT") && d != 10*time.Second {
 			t.Fatal(d)
 		}
 	}
 	for _, value := range []string{"invalid", "-1", "999999999999999999"} {
-		d := retryDelay(&http.Response{Header: http.Header{"Retry-After": []string{value}}}, 1)
+		d := retryDelay(&http.Response{Header: http.Header{"Retry-After": []string{value}}}, 1, now)
 		if d < 750*time.Millisecond || d > time.Second {
 			t.Fatal(d)
 		}
