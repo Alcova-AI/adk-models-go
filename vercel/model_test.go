@@ -309,3 +309,53 @@ func TestGenerationConfigUsesThinkingLevelsWithoutBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIStructuredSchemaIsStrictWithoutMutatingCaller(t *testing.T) {
+	for _, raw := range []bool{false, true} {
+		t.Run(fmt.Sprintf("raw=%t", raw), func(t *testing.T) {
+			nested := &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{"status": {Type: genai.TypeString}}, Required: []string{"status"}}
+			cfg := &genai.GenerateContentConfig{ResponseSchema: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{"result": nested}, Required: []string{"result"}}}
+			if raw {
+				cfg.ResponseJsonSchema = map[string]any{"type": "object", "properties": map[string]any{"result": map[string]any{"type": "object", "properties": map[string]any{"status": map[string]any{"type": "string"}}, "required": []string{"status"}}}, "required": []string{"result"}}
+				cfg.ResponseSchema = nil
+			}
+			before, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				schema := body["responseFormat"].(map[string]any)["schema"].(map[string]any)
+				child := schema["properties"].(map[string]any)["result"].(map[string]any)
+				for _, obj := range []map[string]any{schema, child} {
+					if obj["additionalProperties"] != false {
+						t.Fatalf("schema is not strict: %#v", obj)
+					}
+					if len(obj["required"].([]any)) != 1 {
+						t.Fatalf("missing required property: %#v", obj)
+					}
+				}
+				return jsonResponse(request, `{"content":[{"type":"text","text":"done"}],"finishReason":{"unified":"stop","raw":"stop"}}`), nil
+			})
+			llm, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: transport}, Model: adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna", RequestModel: "openai/gpt-5.6-luna", Vercel: &adkmodels.VercelConfig{}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, err := range llm.GenerateContent(t.Context(), &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("JSON", genai.RoleUser)}, Config: cfg}, false) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			after, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("caller schema changed")
+			}
+		})
+	}
+}

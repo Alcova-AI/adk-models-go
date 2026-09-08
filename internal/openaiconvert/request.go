@@ -21,9 +21,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Alcova-AI/adk-models-go/internal/jsonschema"
 	"mime"
 	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/openai/openai-go/v3/packages/param"
@@ -540,7 +540,7 @@ func newJSONSchemaFormat(cfg *genai.GenerateContentConfig) (*responses.ResponseF
 	if err != nil {
 		return nil, err
 	}
-	enforceStrictOpenAISchema(schema)
+	jsonschema.EnforceOpenAI(schema)
 	name := "adk_response"
 	if cfg.ResponseSchema != nil && cfg.ResponseSchema.Title != "" {
 		name = cfg.ResponseSchema.Title
@@ -566,53 +566,5 @@ func normalizeSchema(schema any) (map[string]any, error) {
 			return nil, fmt.Errorf("openai: unmarshal json schema: %w", err)
 		}
 		return result, nil
-	}
-}
-
-func enforceStrictOpenAISchema(value any) {
-	schema, ok := value.(map[string]any)
-	if !ok {
-		return
-	}
-	if _, hasRef := schema["$ref"]; hasRef {
-		for key := range schema {
-			if key != "$ref" {
-				delete(schema, key)
-			}
-		}
-		return
-	}
-	typeValue, hasType := schema["type"]
-	properties, hasProperties := schema["properties"]
-	if hasType && typeValue == "object" && hasProperties {
-		schema["additionalProperties"] = false
-		if propertyMap, ok := properties.(map[string]any); ok {
-			required := make([]string, 0, len(propertyMap))
-			for key := range propertyMap {
-				required = append(required, key)
-			}
-			sort.Strings(required)
-			schema["required"] = required
-		}
-	}
-	if definitions, ok := schema["$defs"].(map[string]any); ok {
-		for _, definition := range definitions {
-			enforceStrictOpenAISchema(definition)
-		}
-	}
-	if propertyMap, ok := properties.(map[string]any); ok {
-		for _, property := range propertyMap {
-			enforceStrictOpenAISchema(property)
-		}
-	}
-	for _, key := range []string{"anyOf", "oneOf", "allOf"} {
-		if values, ok := schema[key].([]any); ok {
-			for _, child := range values {
-				enforceStrictOpenAISchema(child)
-			}
-		}
-	}
-	if items, ok := schema["items"].(map[string]any); ok {
-		enforceStrictOpenAISchema(items)
 	}
 }

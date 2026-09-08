@@ -274,7 +274,11 @@ func applyGenerationConfig(result *protocol.CallOptions, cfg *genai.GenerateCont
 			}
 			format["schema"] = schema
 		} else if cfg.ResponseJsonSchema != nil {
-			format["schema"] = cfg.ResponseJsonSchema
+			schema, err := normaliseJSONSchema(cfg.ResponseJsonSchema)
+			if err != nil {
+				return err
+			}
+			format["schema"] = schema
 		}
 		result.ResponseFormat = format
 	}

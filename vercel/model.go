@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Alcova-AI/adk-models-go/internal/jsonschema"
 	"io"
 	"iter"
 	"net/http"
@@ -102,6 +103,9 @@ func (m *gatewayModel) GenerateContent(ctx context.Context, req *model.LLMReques
 	options.ProviderOptions = providerOptions
 	options.Reasoning = "" // The shared provider-specific mapping owns effort.
 	if m.family == family.OpenAI {
+		if options.ResponseFormat != nil {
+			jsonschema.EnforceOpenAI(options.ResponseFormat["schema"])
+		}
 		cache := vercelopenai.Options{PromptCaching: m.config.PromptCaching.OpenAI}
 		if err := cache.Apply(&options); err != nil {
 			return singleError(err)
