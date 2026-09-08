@@ -282,9 +282,14 @@ func TestGatewayConfigurationSnapshot(t *testing.T) {
 				if gateway["zeroDataRetention"] != true || gateway["only"].([]any)[0] != "azure" || providers["custom"].(map[string]any)["flag"] != "original" {
 					t.Fatalf("caller mutation changed config: %#v", providers)
 				}
+				byok, _ := gateway["byok"].(map[string]any)
+				credentials, _ := byok["azure"].([]any)
+				if len(byok) != 1 || len(credentials) != 2 || credentials[0].(map[string]any)["apiKey"] != "first" || credentials[1].(map[string]any)["apiKey"] != "second" {
+					t.Fatal("caller mutation changed BYOK credentials")
+				}
 				return wireResponse(r, adapter, false), nil
 			})}
-			cfg := &adkmodels.VercelConfig{ZeroDataRetention: true, Only: []string{"azure"}, ProviderOptions: map[string]map[string]any{"custom": {"flag": "original"}}}
+			cfg := &adkmodels.VercelConfig{ZeroDataRetention: true, Only: []string{"azure"}, ProviderOptions: map[string]map[string]any{"custom": {"flag": "original"}}, BYOK: map[string][]map[string]any{"azure": {{"apiKey": "first"}, {"apiKey": "second"}}}}
 			llm, err := wireModel(adapter, client, adkmodels.ModelConfig{CanonicalModel: "gpt-test", Vercel: cfg})
 			if err != nil {
 				t.Fatal(err)
@@ -292,6 +297,10 @@ func TestGatewayConfigurationSnapshot(t *testing.T) {
 			cfg.ZeroDataRetention = false
 			cfg.Only[0] = "changed"
 			cfg.ProviderOptions["custom"]["flag"] = "changed"
+			cfg.BYOK["azure"][0]["apiKey"] = "changed"
+			cfg.BYOK["azure"][1] = map[string]any{"apiKey": "replaced"}
+			delete(cfg.BYOK, "azure")
+			cfg.BYOK["other"] = []map[string]any{{"apiKey": "added"}}
 			request := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}}
 			for _, err := range llm.GenerateContent(t.Context(), request, false) {
 				if err != nil {
@@ -338,5 +347,46 @@ func TestAdaptersIgnoreUnsupportedCacheControls(t *testing.T) {
 				t.Fatal("request was not sent")
 			}
 		})
+	}
+}
+
+func TestGatewayAnthropicThoughtDisplay(t *testing.T) {
+	for _, adapter := range []string{"anthropic", "openai", "vercel"} {
+		for _, include := range []bool{false, true} {
+			for _, stream := range []bool{false, true} {
+				for _, level := range []genai.ThinkingLevel{"", genai.ThinkingLevelMinimal, genai.ThinkingLevelHigh} {
+					t.Run(fmt.Sprintf("%s/include=%t/stream=%t/level=%s", adapter, include, stream, level), func(t *testing.T) {
+						client := &http.Client{Transport: wireTransport(func(r *http.Request) (*http.Response, error) {
+							var body map[string]any
+							if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+								return nil, err
+							}
+							options := body["providerOptions"].(map[string]any)
+							anthropicOptions, _ := options["anthropic"].(map[string]any)
+							thinking, _ := anthropicOptions["thinking"].(map[string]any)
+							want := ""
+							if level == genai.ThinkingLevelHigh {
+								want = "omitted"
+								if include {
+									want = "summarized"
+								}
+							}
+							assertWireValue(t, thinking, "display", want)
+							return wireResponse(r, adapter, stream), nil
+						})}
+						llm, err := wireModel(adapter, client, adkmodels.ModelConfig{CanonicalModel: "claude-test", RequestModel: "anthropic/claude-test", Vercel: &adkmodels.VercelConfig{}})
+						if err != nil {
+							t.Fatal(err)
+						}
+						req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}, Config: &genai.GenerateContentConfig{ThinkingConfig: &genai.ThinkingConfig{ThinkingLevel: level, IncludeThoughts: include}}}
+						for _, err := range llm.GenerateContent(t.Context(), req, stream) {
+							if err != nil {
+								t.Fatal(err)
+							}
+						}
+					})
+				}
+			}
+		}
 	}
 }

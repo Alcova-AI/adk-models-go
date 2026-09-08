@@ -67,7 +67,15 @@ func familyOptions(f family.Family, r family.Reasoning, include bool, openAI adk
 		}
 	case family.Anthropic:
 		if r.Thinking != "" {
-			values["thinking"] = map[string]any{"type": r.Thinking}
+			thinking := map[string]any{"type": r.Thinking}
+			if r.Thinking == "adaptive" {
+				display := "omitted"
+				if include {
+					display = "summarized"
+				}
+				thinking["display"] = display
+			}
+			values["thinking"] = thinking
 		}
 		if r.Effort != "" {
 			values["effort"] = r.Effort

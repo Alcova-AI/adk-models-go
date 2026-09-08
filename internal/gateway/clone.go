@@ -16,6 +16,7 @@ func CloneConfig(source *adkmodels.VercelConfig) *adkmodels.VercelConfig {
 		return nil
 	}
 	result := *source
+	result.BYOK = cloneBYOK(source.BYOK)
 	result.Only = slices.Clone(source.Only)
 	result.Order = slices.Clone(source.Order)
 	result.Models = slices.Clone(source.Models)
@@ -27,4 +28,19 @@ func CloneConfig(source *adkmodels.VercelConfig) *adkmodels.VercelConfig {
 		result.ProviderTimeouts = &adkmodels.GatewayProviderTimeouts{BYOK: maps.Clone(source.ProviderTimeouts.BYOK)}
 	}
 	return &result
+}
+
+func cloneBYOK(source map[string][]map[string]any) map[string][]map[string]any {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string][]map[string]any, len(source))
+	for provider, credentials := range source {
+		entries := slices.Clone(credentials)
+		for i, credential := range entries {
+			entries[i] = maps.Clone(credential)
+		}
+		result[provider] = entries
+	}
+	return result
 }
