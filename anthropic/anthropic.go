@@ -23,8 +23,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Alcova-AI/adk-models-go/toolschema"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"google.golang.org/genai"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
@@ -48,7 +50,8 @@ const (
 )
 
 type anthropicModel struct {
-	client anthropic.Client
+	schemas *toolschema.Processor
+	client  anthropic.Client
 	// canonicalModel is exposed through Name and controls local capabilities.
 	canonicalModel anthropic.Model
 	// requestModel is the model identifier sent to the API.
@@ -98,8 +101,13 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if tokens == 0 {
 		tokens = defaultMaxTokens
 	}
+	route := "direct"
+	if cfg.Model.Vercel != nil {
+		route = "vercel-anthropic"
+	}
 	return &anthropicModel{
-		client: cfg.Client, canonicalModel: anthropic.Model(cfg.Model.CanonicalModel), requestModel: anthropic.Model(requestModel),
+		schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
+		client:  cfg.Client, canonicalModel: anthropic.Model(cfg.Model.CanonicalModel), requestModel: anthropic.Model(requestModel),
 		defaultMaxTokens: tokens, reasoning: reasoningConfig{DefaultLevel: cfg.Model.Reasoning.DefaultLevel, OpenAI: cfg.Model.Reasoning.OpenAI, Family: f},
 		promptCaching: cache, vercel: cfg.Model.Vercel, family: f, retrySleep: sleepWithContext,
 	}, nil
@@ -119,25 +127,30 @@ func (m *anthropicModel) wireModel() anthropic.Model {
 
 // GenerateContent calls the Anthropic model.
 func (m *anthropicModel) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
+	prepared, err := m.schemas.Prepare(ctx, toolschema.Tools(req))
+	if err != nil {
+		return func(yield func(*model.LLMResponse, error) bool) { yield(nil, err) }
+	}
 	m.maybeAppendUserContent(req)
 
 	if stream {
-		return m.generateStream(ctx, req)
+		return m.generateStream(ctx, req, prepared)
 	}
 
 	return func(yield func(*model.LLMResponse, error) bool) {
-		resp, err := m.generate(ctx, req)
+		resp, err := m.generate(ctx, req, prepared)
 		yield(resp, err)
 	}
 }
 
 // generate calls the model synchronously.
-func (m *anthropicModel) generate(ctx context.Context, req *model.LLMRequest) (*model.LLMResponse, error) {
+func (m *anthropicModel) generate(ctx context.Context, req *model.LLMRequest, prepared map[string]toolschema.Prepared) (*model.LLMResponse, error) {
 	params, err := m.convertRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert request: %w", err)
 	}
 
+	applyToolSchemas(&params, prepared)
 	requestOptions, err := m.requestOptions(req, params.MaxTokens)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert request options: %w", err)
@@ -195,13 +208,14 @@ func filterThoughtParts(parts []*genai.Part) []*genai.Part {
 }
 
 // generateStream returns a stream of responses from the model.
-func (m *anthropicModel) generateStream(ctx context.Context, req *model.LLMRequest) iter.Seq2[*model.LLMResponse, error] {
+func (m *anthropicModel) generateStream(ctx context.Context, req *model.LLMRequest, prepared map[string]toolschema.Prepared) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
 		params, err := m.convertRequest(req)
 		if err != nil {
 			yield(nil, fmt.Errorf("failed to convert request: %w", err))
 			return
 		}
+		applyToolSchemas(&params, prepared)
 		requestOptions, err := m.requestOptions(req, params.MaxTokens)
 		if err != nil {
 			yield(nil, fmt.Errorf("failed to convert request options: %w", err))
@@ -573,5 +587,17 @@ func (m *anthropicModel) maybeAppendUserContent(req *model.LLMRequest) {
 	if last := req.Contents[len(req.Contents)-1]; last != nil && last.Role != "user" {
 		req.Contents = append(req.Contents,
 			genai.NewContentFromText("Continue processing previous requests as instructed.", "user"))
+	}
+}
+
+func applyToolSchemas(params *anthropic.MessageNewParams, prepared map[string]toolschema.Prepared) {
+	for i := range params.Tools {
+		if fn := params.Tools[i].OfTool; fn != nil {
+			schema := prepared[fn.Name]
+			fn.InputSchema = param.Override[anthropic.ToolInputSchemaParam](schema.Schema)
+			if schema.Strict != nil {
+				fn.Strict = anthropic.Bool(*schema.Strict)
+			}
+		}
 	}
 }

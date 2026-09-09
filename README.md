@@ -208,3 +208,67 @@ Existing adapter releases remain available during migration.
 ## Licence
 
 Apache License 2.0. See [LICENSE](LICENSE). Existing copyright notices and applicable [third-party attribution](THIRD_PARTY_NOTICES.md) are preserved.
+
+## Tool schema compatibility (trial)
+
+Every adapter checks function schemas before sending a request. Define inputs
+with either `FunctionDeclaration.Parameters` (`genai.Schema`) or
+`ParametersJsonSchema` (a JSON-serialisable schema object), never both. Tool
+schemas must have an object root. The raw form uses JSON Schema 2020-12 (other explicitly declared drafts are
+rejected during this trial rather than silently reinterpreted);
+OpenAPI `nullable` belongs in the typed form, where the adapter converts it to
+an `anyOf` null alternative. Property names and example/default/enum data are
+not treated as schema keywords.
+
+The default rejects unsupported constraints. Callers that validate arguments
+before execution can explicitly permit weaker provider enforcement:
+
+```go
+Model: adkmodels.ModelConfig{
+    CanonicalModel: "gpt-5.6-luna",
+    ToolSchemas: toolschema.Config{AllowUnsupported: true},
+}
+```
+
+Import `github.com/Alcova-AI/adk-models-go/toolschema`. The optional `Warn`
+callback receives the tool name, schema path, keyword, provider, route and
+reason. Without a callback, structured warnings use the default Go logger.
+Warnings are deduplicated per model instance with a bounded 256-entry cache;
+no schema values or arguments are logged. This option never suppresses malformed
+schema errors, unknown keywords or unresolved/external references.
+
+For OpenAI and Claude, schemas that meet the checked strict-mode requirements
+use `strict: true`. Open objects and, for OpenAI, optional fields that cannot
+be represented without changing the contract require the explicit opt-in and
+use `strict: false`. In particular, the adapter does not silently make optional
+fields required or invent nullability to satisfy OpenAI's automatic normalisation.
+Compatibility checking is distinct from provider strict decoding.
+
+The current trial profiles are intentionally conservative:
+
+| Route | Behaviour |
+|---|---|
+| OpenAI Responses, direct or Vercel | Standard JSON Schema subset; unsupported composition rules require opt-in. Optional fields retain their original meaning. |
+| Claude, direct or Vercel | Unsupported numeric bounds, length rules and unrestricted regex patterns require opt-in. Root-level schema rules are preserved. |
+| Gemini, direct or Vertex | `toolschema.WrapGemini` checks the input while the Google SDK retains ownership of its native typed format. |
+| Gemini through Vercel | Checks known additional losses in the public Google converter, including numeric bounds, pattern and maximum string length. |
+
+Presentation-only property ordering may be dropped with a warning. Unsupported
+assertions are removed only with opt-in; unsupported `oneOf` can become `anyOf`
+with an explicit exclusivity-loss warning. Local static references are checked,
+but reference conversion outside OpenAI and dynamic references remain errors
+in this trial rather than being silently erased. This is not a complete
+cross-provider JSON Schema implementation or a guarantee of business correctness.
+Provider model availability, schema complexity limits and model-specific
+restrictions still apply. Validate actual arguments before execution.
+
+Sources for these profiles:
+
+- [OpenAI strict tool calling](https://developers.openai.com/api/docs/guides/function-calling#strict-mode)
+- [OpenAI supported schemas](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas)
+- [Claude schema limitations](https://platform.claude.com/docs/en/build-with-claude/structured-outputs#json-schema-limitations)
+- [Google schema reference](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/Schema)
+- [Vercel Google converter at the protocol's pinned revision](https://github.com/vercel/ai/blob/fe86f8fb03a08af90b05cb79df66d3230d1e2666/packages/google/src/convert-json-schema-to-openapi-schema.ts)
+
+The gateway's private downstream implementation is not inspected by this
+library. Live route tests are required before expanding a compatibility claim.

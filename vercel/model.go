@@ -18,6 +18,7 @@ import (
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	vercelopenai "github.com/Alcova-AI/adk-models-go/internal/vercelopenai"
+	"github.com/Alcova-AI/adk-models-go/toolschema"
 	"google.golang.org/genai"
 
 	"google.golang.org/adk/v2/model"
@@ -28,6 +29,7 @@ import (
 const defaultMaxTokens int32 = 16384
 
 type gatewayModel struct {
+	schemas          *toolschema.Processor
 	apiKey           string
 	canonicalModel   string
 	requestModel     string
@@ -68,7 +70,7 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if client == nil {
 		client = &http.Client{Transport: &retryTransport{base: http.DefaultTransport, sleep: retrySleep}}
 	}
-	return &gatewayModel{apiKey: cfg.APIKey, canonicalModel: cfg.Model.CanonicalModel, requestModel: requestModel,
+	return &gatewayModel{schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: "vercel-native"}), apiKey: cfg.APIKey, canonicalModel: cfg.Model.CanonicalModel, requestModel: requestModel,
 		baseURL: normaliseBaseURL(cfg.BaseURL), httpClient: client, headers: cfg.Headers.Clone(), defaultMaxTokens: tokens,
 		config: cfg.Model, family: f}, nil
 }
@@ -79,9 +81,18 @@ func (m *gatewayModel) GenerateContent(ctx context.Context, req *model.LLMReques
 	if req == nil {
 		return singleError(ErrRequestNil)
 	}
+	prepared, err := m.schemas.Prepare(ctx, toolschema.Tools(req))
+	if err != nil {
+		return singleError(err)
+	}
 	options, err := buildCallOptions(req, m.defaultMaxTokens)
 	if err != nil {
 		return singleError(fmt.Errorf("failed to convert request: %w", err))
+	}
+	for i := range options.Tools {
+		schema := prepared[options.Tools[i].Name]
+		options.Tools[i].InputSchema = schema.Schema
+		options.Tools[i].Strict = schema.Strict
 	}
 	var thinking *genai.ThinkingConfig
 	if req.Config != nil {

@@ -12,6 +12,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/Alcova-AI/adk-models-go/internal/family"
+	"github.com/Alcova-AI/adk-models-go/toolschema"
 )
 
 const (
@@ -20,6 +21,7 @@ const (
 )
 
 type ModelConfig struct {
+	ToolSchemas            toolschema.Config
 	CanonicalModel         string
 	RequestModel           string
 	DefaultMaxOutputTokens int32
