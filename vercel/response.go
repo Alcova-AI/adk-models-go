@@ -20,7 +20,13 @@ import (
 
 func convertGenerateResult(result protocol.GenerateResult, includeThoughts bool) (*model.LLMResponse, error) {
 	parts := make([]*genai.Part, 0, len(result.Content))
+	var sources []*genai.GroundingChunk
 	for _, output := range result.Content {
+		if output.Type == "source" {
+			if source := webSource(output.SourceType, output.URL, output.Title); source != nil {
+				sources = append(sources, source)
+			}
+		}
 		part, err := convertOutputPart(output, includeThoughts)
 		if err != nil {
 			return nil, err
@@ -37,6 +43,11 @@ func convertGenerateResult(result protocol.GenerateResult, includeThoughts bool)
 	if result.Response != nil {
 		response.ModelVersion = result.Response.ModelID
 	}
+	grounding, err := groundingMetadata(result.ProviderMetadata, sources)
+	if err != nil {
+		return nil, err
+	}
+	response.GroundingMetadata = grounding
 	attachMetadata(response, result.ProviderMetadata, result.Usage)
 	if result.Response != nil {
 		parsed, _ := adkmodels.MetadataFromResponse(response)

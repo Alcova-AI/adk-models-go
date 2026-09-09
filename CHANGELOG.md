@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.1.2] - Enterprise Web Search
+
+### Added
+
+- Native Vercel support for Google Enterprise Web Search
+- Source links and Google grounding metadata in streamed and non-streamed responses
+
 ## [v0.1.1] - Tool schema compatibility
 
 ### Added
