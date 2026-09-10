@@ -85,6 +85,7 @@ func matrixCases(t testing.TB) []schemaCase {
 	}
 	normaliseLegacyTypes(legacy)
 	cases = append(cases, schemaCase{Name: "legacy-list-clients-typed", Schema: legacy, Typed: &typed, Valid: `{"pagination":{"first":5}}`, Conflict: `{"pagination":{"first":"five"}}`})
+	cases = append(cases, repeatedObjectCases()...)
 	return cases
 }
 func matrixValidator(schema map[string]any) (*validator.Schema, error) {
@@ -157,4 +158,49 @@ func normaliseLegacyTypes(schema map[string]any) {
 	if child, ok := schema["items"].(map[string]any); ok {
 		normaliseLegacyTypes(child)
 	}
+}
+
+// Paired schemas describe the same arguments. The referenced version shares
+// objects through two levels of definitions and also uses a reference in items.
+func repeatedObjectCases() []schemaCase {
+	object := func(properties map[string]any, required ...any) map[string]any {
+		return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
+	}
+	address := object(map[string]any{
+		"street":  map[string]any{"type": "string"},
+		"city":    map[string]any{"type": "string"},
+		"country": map[string]any{"type": "string", "enum": []any{"AU", "NZ"}},
+	}, "street", "city", "country")
+	valid := `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"AU"}},"secondary":{"name":"B","address":{"street":"2 Test St","city":"Wellington","country":"NZ"}},"others":[{"name":"C","address":{"street":"3 Test St","city":"Sydney","country":"AU"}}]}`
+	conflict := strings.Replace(valid, `"country":"NZ"`, `"country":"XX"`, 1)
+	var cases []schemaCase
+	for _, refs := range []bool{false, true} {
+		suffix := "inline"
+		addressUse := address
+		if refs {
+			suffix = "ref"
+			addressUse = map[string]any{"$ref": "#/$defs/Address"}
+		}
+		contact := object(map[string]any{"name": map[string]any{"type": "string"}, "address": addressUse}, "name", "address")
+		contactUse := contact
+		if refs {
+			contactUse = map[string]any{"$ref": "#/$defs/Contact"}
+		}
+		schema := object(map[string]any{"primary": contactUse, "secondary": contactUse, "others": map[string]any{"type": "array", "items": contactUse}}, "primary", "secondary", "others")
+		nullable := object(map[string]any{"primary": contactUse, "secondary": map[string]any{"anyOf": []any{contactUse, map[string]any{"type": "null"}}}}, "primary", "secondary")
+		if refs {
+			schema["$defs"] = map[string]any{"Address": address, "Contact": contact}
+			nullable["$defs"] = map[string]any{"Address": address, "Contact": contact}
+		}
+		optional := object(map[string]any{"primary": contactUse, "secondary": map[string]any{"anyOf": []any{contactUse, map[string]any{"type": "null"}}}}, "primary")
+		if refs {
+			optional["$defs"] = map[string]any{"Address": address, "Contact": contact}
+		}
+		cases = append(cases,
+			schemaCase{"optional-object-" + suffix, optional, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"AU"}}}`, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"XX"}}}`, nil},
+			schemaCase{"repeated-object-" + suffix, schema, valid, conflict, nil},
+			schemaCase{"nullable-object-" + suffix, nullable, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"AU"}},"secondary":null}`, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"XX"}},"secondary":null}`, nil},
+		)
+	}
+	return cases
 }

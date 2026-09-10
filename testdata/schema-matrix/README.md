@@ -4,7 +4,7 @@ Last tested: **10 September 2026** (Australia/Melbourne).
 
 ## Scope
 
-33 schema cases in non-streaming mode, with six selected cases repeated in streaming mode. Each case requests one valid and one conflicting argument object. Default mode rejects unsupported contracts locally; fallback mode runs only when default mode rejects the schema and explicitly allows weaker enforcement. No tools or customer actions execute.
+39 schema cases, including six new paired inline/reference cases tested in both non-streaming and streaming modes. Each case requests one valid and one conflicting argument object. Default mode rejects unsupported contracts locally; fallback mode runs only when default mode rejects the schema and explicitly allows weaker enforcement. No tools or customer actions execute.
 
 | Route label | Model | Connection |
 |---|---|---|
@@ -15,7 +15,7 @@ Last tested: **10 September 2026** (Australia/Melbourne).
 | gemini-vertex | `gemini-3.1-flash-lite` | Vertex |
 | gemini-native / gemini-responses / gemini-messages | `google/gemini-3.1-flash-lite` | Vercel native / Responses / Messages |
 
-Completed coverage: **10 routes**, 1,266 records and 766 HTTP attempts. **383/383 valid attempted requests** returned the requested valid arguments. Local rejections make no HTTP request. These totals are test observations, not production success rates.
+The original 33-case baseline covered **10 routes**, 1,266 records and 766 HTTP attempts. **383/383 valid attempted requests** returned the requested valid arguments. Local rejections make no HTTP request. These baseline totals exclude the new reference comparison below and are test observations, not production success rates.
 
 ## Supported behaviour and limits
 
@@ -25,7 +25,7 @@ Completed coverage: **10 routes**, 1,266 records and 766 HTTP attempts. **383/38
 - The original client-list schema passed three additional authenticated backend samples through Vercel Responses, including the real argument decoder, protobuf validation and pagination parser.
 - Unsupported constraints fail locally by default. With explicit fallback, they may be removed or weakened with warnings. Claude and Gemini Gateway root alternatives require this fallback; Claude and Google oneOf are removed instead of converted to rejected shapes.
 - Static local references remain supported only on OpenAI routes in this adapter. Other reference conversions remain local errors, including with fallback enabled.
-- Schema acceptance and a strict flag do not guarantee argument enforcement. Backend validation remains required. The table below distinguishes observed conformance from weakened or violated contracts.
+- Schema acceptance and a strict flag do not guarantee argument enforcement. Backend validation remains required. The tables below distinguish adapter support from provider-only probes and observed conformance.
 
 ## Non-streaming results
 
@@ -74,6 +74,12 @@ A single pair is a small sample. **S** means observed conformance for this model
 | root-anyOf | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
 | root-oneOf | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
 | uniqueItems | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
+| nullable-object-inline | S | S | S | S | S | W | S | S* | S* | S* |
+| nullable-object-ref | S | S | S | L | L | L | L | L | L | L |
+| optional-object-inline | W* | W* | W* | S | S | W | S | S* | S* | S* |
+| optional-object-ref | W* | W* | W* | L | L | L | L | L | L | L |
+| repeated-object-inline | S | S | S | S | S | W | S | S* | S* | S* |
+| repeated-object-ref | S | S | S | L | L | L | L | L | L | L |
 
 ## Streaming coverage
 
@@ -104,11 +110,73 @@ Conflicting prompts also produced schema violations, particularly under explicit
 
 ## Reproduction and evidence
 
-See the [README live-matrix instructions](../../README.md#repeatable-live-schema-matrix). The maintained fixtures and independent positive/negative oracles live in `schema_matrix_cases_test.go`. Wire tests check serialisation separately from provider behaviour.
+See the [live-matrix instructions](#repeatable-live-schema-matrix). The maintained fixtures and independent positive/negative oracles live in `schema_matrix_cases_test.go`. Wire tests check serialisation separately from provider behaviour.
 
 Each raw run retains its collection manifest, planned case identities, source hashes, outgoing schema, strict flags, warnings, HTTP status, final tool name, stop reason, errors and argument-validation results. Source manifests identify the implementation tested by each run. For repeated route/case pairs, the latest complete run replaces the earlier results. Raw provider probes are available as a separate mode; the results above use the checked adapter paths, not probes.
 
 Coverage does not establish all schema dialects, keyword combinations, formats, model versions or complexity limits. Claude direct coverage means Vertex, not the Anthropic-hosted endpoint; Gemini direct coverage means Vertex, not the Developer API. Gateway downstream requests are not visible.
+
+## Repeated-object reference comparison
+
+Last tested: **10 September 2026**. Each pair uses the same argument contract and prompts: one schema repeats the objects inline, the other uses `$defs` and local `$ref`. References span two definition levels, direct properties and array items. Separate pairs cover explicit null and omission of an optional nullable object. These are synthetic tool definitions, not production RPC schemas.
+
+This comparison contains 678 records and 422 HTTP attempts across all ten routes. Of 211 valid attempted requests, 195 returned the exact requested arguments. Counts include adapter calls and separate provider probes; local blocks make no HTTP request.
+
+### Adapter results
+
+The main table above includes the new non-streaming cases. Streaming produced the same S/W/L classifications for all six new cases. The adapter still blocks references on Claude and Gemini, including fallback. OpenAI routes accept the repeated and nullable reference schemas; optional schemas require fallback. No production reference support was added by this comparison.
+
+### Provider probes
+
+Probes bypass the local adapter check and replace the schema at the final HTTP boundary. **S** means both samples conformed and the valid sample matched exactly; **W** means a violation or changed valid arguments; **E** means an API or call error. Each cell is **non-streaming / streaming**. These observations do not establish end-to-end adapter support.
+
+| Route | Repeated objects with refs | Nullable object with refs | Optional object with refs |
+|---|---|---|---|
+| luna-direct | S / S | S / S | E / E |
+| luna-native | S / S | S / S | E / E |
+| luna-responses | S / S | S / S | W / W |
+| haiku-vertex | S / S | S / S | S / S |
+| haiku-native | S / S | S / S | S / S |
+| haiku-messages | W / W | W / W | W / W |
+| gemini-vertex | S / S | S / S | S / S |
+| gemini-native | S / S | S / S | S / S |
+| gemini-responses | S / S | S / S | S / S |
+| gemini-messages | S / S | S / S | S / S |
+
+- All ten routes accepted the repeated and explicit-null reference probes, and all their valid samples matched exactly. Claude through the Messages Gateway returned the invalid requested country in conflicting prompts, for both inline and reference forms.
+- Optional-object probes on direct OpenAI and the native OpenAI Gateway returned HTTP 400 because probe mode retains `strict: true` while the schema has an optional property. The inline controls failed identically. These are strict-mode shape rejections, not evidence that references are unsupported.
+- OpenAI through Vercel Responses added `"secondary": null` when the valid prompt omitted that property, with both inline and reference forms, in both adapter fallback and probes. No secondary object data was invented in these samples. The returned object satisfied the schema but did not match the requested arguments. Whether this changes execution depends on the caller: some tools treat null as omission, while others distinguish null from an absent property. The existing omission conversion does not cover references or nullable alternatives.
+- Claude and Gemini reference probes are promising, but their normal adapter paths remain blocked. Gateway wire captures confirm refs reached the Gateway; its private downstream conversion and billed schema token count are not visible.
+
+### Schema size
+
+Compact JSON token estimates using `o200k_base`, before provider conversion:
+
+| Paired fixture | Inline | References |
+|---|---:|---:|
+| repeated-object | 265 | 158 |
+| nullable-object | 187 | 147 |
+| optional-object | 185 | 145 |
+
+These are input-schema estimates, not provider-reported billing tokens. The definitions are sent once per tool schema; they are not shared across tools or requests.
+
+### Reproduce this comparison
+
+Run the following after configuring the API keys and Google credentials described below. Use a fresh output directory each time. Vertex Gemini uses `global`; Vertex Claude uses `us-east5` for this comparison. The first command covers the other nine routes.
+
+```sh
+export ADK_SCHEMA_CASES=local-ref,repeated-object-inline,repeated-object-ref,nullable-object-inline,nullable-object-ref,optional-object-inline,optional-object-ref
+export ADK_SCHEMA_MODES=default,fallback,probe
+ADK_SCHEMA_LIVE=1 GOOGLE_CLOUD_LOCATION=us-east5 \
+  ADK_SCHEMA_ROUTES=luna-direct,luna-native,luna-responses,haiku-vertex,haiku-native,haiku-messages,gemini-native,gemini-responses,gemini-messages \
+  ADK_SCHEMA_OUTPUT="$PWD/dist/schema-matrix/refs-other" \
+  go test . -run '^TestSchemaMatrixLive$' -parallel 8 -count=1 -timeout 12m
+ADK_SCHEMA_LIVE=1 GOOGLE_CLOUD_LOCATION=global ADK_SCHEMA_ROUTES=gemini-vertex \
+  ADK_SCHEMA_OUTPUT="$PWD/dist/schema-matrix/refs-gemini" \
+  go test . -run '^TestSchemaMatrixLive$' -parallel 8 -count=1 -timeout 12m
+```
+
+Repeat with `ADK_SCHEMA_STREAM=1`, new output directories and the six object cases (omit `local-ref`) for the streaming comparison. The initial Gemini attempt in `us-east5` returned model-route 404 errors; the complete `global` rerun supersedes those observations. Raw manifests retain both runs.
 
 ## Compatibility reference and running the matrix
 
