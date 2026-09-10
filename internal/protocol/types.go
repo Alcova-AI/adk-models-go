@@ -91,9 +91,24 @@ type FunctionTool struct {
 	Type            string          `json:"type"`
 	Name            string          `json:"name"`
 	Description     string          `json:"description,omitempty"`
-	InputSchema     map[string]any  `json:"inputSchema"`
+	InputSchema     map[string]any  `json:"inputSchema,omitempty"`
+	ID              string          `json:"id,omitempty"`
+	Args            *map[string]any `json:"args,omitempty"`
 	Strict          *bool           `json:"strict,omitempty"`
 	ProviderOptions ProviderOptions `json:"providerOptions,omitempty"`
+}
+
+// MarshalJSON retains the required schema for function tools, including an
+// explicitly empty schema. Provider tools do not carry an inputSchema.
+func (t FunctionTool) MarshalJSON() ([]byte, error) {
+	type toolAlias FunctionTool
+	if t.Type == "function" {
+		return json.Marshal(struct {
+			toolAlias
+			InputSchema map[string]any `json:"inputSchema"`
+		}{toolAlias: toolAlias(t), InputSchema: t.InputSchema})
+	}
+	return json.Marshal(toolAlias(t))
 }
 
 type ToolChoice struct {
@@ -110,6 +125,9 @@ type GenerateResult struct {
 }
 
 type OutputPart struct {
+	SourceType       string         `json:"sourceType,omitempty"`
+	URL              string         `json:"url,omitempty"`
+	Title            string         `json:"title,omitempty"`
 	Type             string         `json:"type"`
 	Text             string         `json:"text,omitempty"`
 	Delta            string         `json:"delta,omitempty"`
@@ -155,6 +173,9 @@ type ResponseMetadata struct {
 }
 
 type StreamPart struct {
+	SourceType       string         `json:"sourceType,omitempty"`
+	URL              string         `json:"url,omitempty"`
+	Title            string         `json:"title,omitempty"`
 	Type             string         `json:"type"`
 	ID               string         `json:"id,omitempty"`
 	Delta            string         `json:"delta,omitempty"`

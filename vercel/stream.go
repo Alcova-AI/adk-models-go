@@ -70,6 +70,7 @@ func (m *gatewayModel) generateStream(ctx context.Context, options protocol.Call
 var errConsumerStopped = fmt.Errorf("consumer stopped")
 
 type streamState struct {
+	sources           []*genai.GroundingChunk
 	content           []*genai.Part
 	textParts         map[string]*genai.Part
 	reasoning         map[string]*strings.Builder
@@ -104,7 +105,12 @@ func (s *streamState) initialize() {
 func (s *streamState) convert(part protocol.StreamPart, includeThoughts bool) (*model.LLMResponse, bool, error) {
 	s.initialize()
 	switch part.Type {
-	case "stream-start", "tool-input-start", "tool-input-delta", "tool-input-end", "raw", "source", "custom", "tool-approval-request":
+	case "stream-start", "tool-input-start", "tool-input-delta", "tool-input-end", "raw", "custom", "tool-approval-request":
+		return nil, false, nil
+	case "source":
+		if source := webSource(part.SourceType, part.URL, part.Title); source != nil {
+			s.sources = append(s.sources, source)
+		}
 		return nil, false, nil
 	case "text-start":
 		s.startText(part.ID)
@@ -193,6 +199,11 @@ func (s *streamState) convert(part protocol.StreamPart, includeThoughts bool) (*
 		return partial(converted), false, nil
 	case "finish":
 		response := &model.LLMResponse{Content: &genai.Content{Role: string(genai.RoleModel), Parts: s.content}, FinishReason: finishReason(part.FinishReason), UsageMetadata: usageMetadata(part.Usage), ModelVersion: s.modelID, TurnComplete: true}
+		grounding, err := groundingMetadata(part.ProviderMetadata, s.sources)
+		if err != nil {
+			return nil, false, err
+		}
+		response.GroundingMetadata = grounding
 		attachMetadata(response, part.ProviderMetadata, part.Usage)
 		parsed, _ := adkmodels.MetadataFromResponse(response)
 		parsed.ResponseID = s.responseID

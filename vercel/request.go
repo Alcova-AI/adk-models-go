@@ -307,8 +307,15 @@ func convertTools(source []*genai.Tool) ([]protocol.FunctionTool, error) {
 		if tool == nil {
 			return nil, fmt.Errorf("vercel: tool %d is nil", i)
 		}
-		if tool.Retrieval != nil || tool.GoogleSearch != nil || tool.GoogleSearchRetrieval != nil || tool.GoogleMaps != nil || tool.EnterpriseWebSearch != nil || tool.URLContext != nil || tool.ComputerUse != nil || tool.CodeExecution != nil {
+		if tool.Retrieval != nil || tool.GoogleSearch != nil || tool.GoogleSearchRetrieval != nil || tool.GoogleMaps != nil || tool.URLContext != nil || tool.ComputerUse != nil || tool.CodeExecution != nil {
 			return nil, fmt.Errorf("vercel: non-function tools are not supported (tool %d)", i)
+		}
+		if tool.EnterpriseWebSearch != nil {
+			if tool.EnterpriseWebSearch.BlockingConfidence != "" || len(tool.EnterpriseWebSearch.ExcludeDomains) > 0 {
+				return nil, fmt.Errorf("vercel: enterprise web search configuration is not supported")
+			}
+			args := map[string]any{}
+			result = append(result, protocol.FunctionTool{Type: "provider", Name: "enterprise_web_search", ID: "google.enterprise_web_search", Args: &args})
 		}
 		for _, declaration := range tool.FunctionDeclarations {
 			if declaration == nil || declaration.Name == "" {
