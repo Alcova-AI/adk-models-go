@@ -3,6 +3,8 @@ package adkmodels_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	validator "github.com/santhosh-tekuri/jsonschema/v6"
 	"net/http"
 	"strings"
 	"testing"
@@ -52,8 +54,29 @@ func TestToolSchemaWireConversion(t *testing.T) {
 				if strings.Contains(string(raw), `"nullable"`) {
 					t.Fatalf("nullable leaked: %s", raw)
 				}
-				if !strings.Contains(string(raw), `"anyOf"`) || !strings.Contains(string(raw), "Root guidance") {
+				if !strings.Contains(string(raw), "Root guidance") {
 					t.Fatalf("schema lost: %s", raw)
+				}
+				tool := body["tools"].([]any)[0].(map[string]any)
+				var schema any
+				for _, key := range []string{"parameters", "input_schema", "inputSchema"} {
+					if candidate, ok := tool[key]; ok {
+						schema = candidate
+					}
+				}
+				compiler := validator.NewCompiler()
+				if err := compiler.AddResource("urn:wire", schema); err != nil {
+					t.Fatal(err)
+				}
+				compiled, err := compiler.Compile("urn:wire")
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, colour := range []any{nil, "RED", "BLUE", ""} {
+					valid := colour == nil || colour == "RED"
+					if err := compiled.Validate(map[string]any{"colour": colour}); (err == nil) != valid {
+						t.Fatalf("wire colour %v validity mismatch: %v", colour, err)
+					}
 				}
 				if !strings.Contains(string(raw), `"strict":false`) {
 					t.Fatalf("best-effort mode not explicit: %s", raw)
@@ -134,6 +157,53 @@ func TestDefaultToolSchemaPolicyOnWire(t *testing.T) {
 				raw, _ := json.Marshal(body)
 				if calls != 1 || !strings.Contains(string(raw), `"strict":true`) {
 					t.Fatalf("did not enable strict: %s", raw)
+				}
+			})
+		}
+	}
+}
+
+func TestSchemaNumbersRemainNumbersOnWire(t *testing.T) {
+	for _, adapter := range []string{"openai", "anthropic", "vercel"} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", adapter, stream), func(t *testing.T) {
+				var body map[string]any
+				client := &http.Client{Transport: wireTransport(func(r *http.Request) (*http.Response, error) {
+					d := json.NewDecoder(r.Body)
+					d.UseNumber()
+					if err := d.Decode(&body); err != nil {
+						return nil, err
+					}
+					return wireResponse(r, adapter, stream), nil
+				})}
+				name := "gpt-5.6-luna"
+				if adapter == "anthropic" {
+					name = "claude-test"
+				}
+				llm, err := wireModel(adapter, client, adkmodels.ModelConfig{CanonicalModel: name, ToolSchemas: toolschema.Config{AllowUnsupported: true, Warn: func(context.Context, toolschema.Warning) {}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw := json.RawMessage(`{"type":"object","properties":{"count":{"type":"integer","minimum":5,"enum":[9007199254740993]},"items":{"type":"array","items":{"type":"integer"},"minItems":1}},"required":["count","items"],"additionalProperties":false}`)
+				req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("test", genai.RoleUser)}, Config: &genai.GenerateContentConfig{Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "example", ParametersJsonSchema: raw}}}}}}
+				for _, err := range llm.GenerateContent(t.Context(), req, stream) {
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				key := map[string]string{"openai": "parameters", "anthropic": "input_schema", "vercel": "inputSchema"}[adapter]
+				schema := body["tools"].([]any)[0].(map[string]any)[key].(map[string]any)
+				props := schema["properties"].(map[string]any)
+				if got := props["count"].(map[string]any)["enum"].([]any)[0]; got != json.Number("9007199254740993") {
+					t.Fatalf("numeric enum changed: %#v", got)
+				}
+				if got := props["items"].(map[string]any)["minItems"]; got != json.Number("1") {
+					t.Fatalf("cardinality changed: %#v", got)
+				}
+				if adapter != "anthropic" {
+					if got := props["count"].(map[string]any)["minimum"]; got != json.Number("5") {
+						t.Fatalf("numeric bound changed: %#v", got)
+					}
 				}
 			})
 		}

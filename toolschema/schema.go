@@ -41,7 +41,10 @@ func (w Warning) Error() string {
 }
 
 type Prepared struct {
-	Schema map[string]any
+	omissions *omissionPlan
+	Schema    map[string]any
+	// JSONSchema preserves numeric tokens across SDK encoders that treat json.Number as a string.
+	JSONSchema json.RawMessage
 	// Strict is nil for native Gemini, where the SDK owns the wire format.
 	Strict *bool
 }
@@ -84,6 +87,15 @@ func (p *Processor) Prepare(ctx context.Context, tools []*genai.Tool) (map[strin
 				return nil, fmt.Errorf("tool %q converted schema: %w", fd.Name, err)
 			}
 			prepared := Prepared{Schema: schema}
+			if p.target.Provider == "openai" && p.target.Route == "vercel-openai" {
+				prepared.omissions, err = p.encodeOmissions(ctx, fd.Name, schema, "#")
+				if err != nil {
+					return nil, err
+				}
+				if err = validate(schema); err != nil {
+					return nil, fmt.Errorf("tool %q omission schema: %w", fd.Name, err)
+				}
+			}
 			if p.target.Provider == "openai" || p.target.Provider == "anthropic" {
 				strict := strictCompatible(schema, p.target.Provider)
 				if !strict {
@@ -92,6 +104,10 @@ func (p *Processor) Prepare(ctx context.Context, tools []*genai.Tool) (map[strin
 					}
 				}
 				prepared.Strict = &strict
+			}
+			prepared.JSONSchema, err = json.Marshal(schema)
+			if err != nil {
+				return nil, fmt.Errorf("tool %q encode prepared schema: %w", fd.Name, err)
 			}
 			result[fd.Name] = prepared
 		}

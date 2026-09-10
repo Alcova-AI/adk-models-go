@@ -20,6 +20,9 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 	if !slices.Contains([]string{"openai", "anthropic", "google"}, p.target.Provider) {
 		return p.loss(ctx, tool, path, "provider", "no verified tool schema compatibility profile")
 	}
+	if p.target.Provider == "anthropic" {
+		flattenNullableEnum(obj)
+	}
 	for _, key := range sortedKeys(obj) {
 		if key == "$schema" || key == "$comment" {
 			delete(obj, key)
@@ -40,11 +43,12 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 		if key == "$ref" && p.target.Provider != "openai" {
 			return fmt.Errorf("tool %q schema %s/$ref: reference conversion for %s/%s is not supported by this trial", tool, path, p.target.Provider, p.target.Route)
 		}
-		if !p.supports(key, obj[key]) {
+		rootAlternative := path == "#" && (key == "anyOf" || key == "allOf") && (p.target.Provider == "anthropic" || (p.target.Provider == "google" && strings.HasPrefix(p.target.Route, "vercel")))
+		if rootAlternative || !p.supports(key, obj[key]) {
 			if err := p.loss(ctx, tool, path+"/"+escape(key), key, "constraint cannot be preserved by this route"); err != nil {
 				return err
 			}
-			if key == "oneOf" {
+			if key == "oneOf" && p.target.Provider != "google" && !(path == "#" && p.target.Provider == "anthropic") {
 				// anyOf retains the possible shapes while relaxing exclusivity. Preserve
 				// an existing anyOf by combining both requirements under allOf only on
 				// routes that support it; otherwise removing oneOf is the safe widening.
@@ -123,4 +127,35 @@ func strictCompatible(schema map[string]any, provider string) bool {
 		compatible = false
 	}
 	return compatible
+}
+
+// A finite nullable enum has an equivalent union form. Claude can generate an
+// empty string for the anyOf form, even when the requested value is null.
+func flattenNullableEnum(obj map[string]any) {
+	branches, ok := obj["anyOf"].([]any)
+	if !ok || len(branches) != 2 {
+		return
+	}
+	for i := range branches {
+		value, ok := branches[i].(map[string]any)
+		null, isMap := branches[1-i].(map[string]any)
+		if !ok || !isMap || len(value) != 2 || len(null) != 1 || null["type"] != "null" {
+			continue
+		}
+		typ, isType := value["type"].(string)
+		values, isEnum := value["enum"].([]any)
+		if !isType || !isEnum || typ == "null" {
+			continue
+		}
+		if _, exists := obj["type"]; exists {
+			return
+		}
+		if _, exists := obj["enum"]; exists {
+			return
+		}
+		obj["type"] = []any{typ, "null"}
+		obj["enum"] = append(slices.Clone(values), nil)
+		delete(obj, "anyOf")
+		return
+	}
 }

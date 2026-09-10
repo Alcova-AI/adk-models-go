@@ -594,7 +594,7 @@ func applyToolSchemas(params *anthropic.MessageNewParams, prepared map[string]to
 	for i := range params.Tools {
 		if fn := params.Tools[i].OfTool; fn != nil {
 			schema := prepared[fn.Name]
-			fn.InputSchema = param.Override[anthropic.ToolInputSchemaParam](schema.Schema)
+			fn.InputSchema = param.Override[anthropic.ToolInputSchemaParam](schema.JSONSchema)
 			if schema.Strict != nil {
 				fn.Strict = anthropic.Bool(*schema.Strict)
 			}

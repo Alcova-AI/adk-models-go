@@ -172,3 +172,80 @@ func TestRootAnyOfNeedsExplicitOpenAIFallback(t *testing.T) {
 		t.Fatal("silently discarded root constraint")
 	}
 }
+
+func TestRootAlternativesRequireLossOnRestrictedRoutes(t *testing.T) {
+	for _, target := range []Target{{"anthropic", "vertex"}, {"anthropic", "vercel-anthropic"}, {"google", "vercel-native"}, {"google", "vercel-openai"}} {
+		t.Run(target.Provider+target.Route, func(t *testing.T) {
+			for _, keyword := range []string{"anyOf", "allOf", "oneOf"} {
+				schema := map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "integer"}}, "required": []any{"x"}, "additionalProperties": false, keyword: []any{map[string]any{"required": []any{"x"}}}}
+				fd := &genai.FunctionDeclaration{Name: "test", ParametersJsonSchema: schema}
+				if _, err := New(Config{}, target).Prepare(t.Context(), tools(fd)); err == nil {
+					t.Fatal("accepted unsupported root alternative")
+				}
+				warnings := []Warning{}
+				got, err := New(Config{AllowUnsupported: true, Warn: func(_ context.Context, w Warning) { warnings = append(warnings, w) }}, target).Prepare(t.Context(), tools(fd))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got["test"].Schema[keyword] != nil || got["test"].Schema["anyOf"] != nil {
+					t.Fatal("retained rejected root shape")
+				}
+				found := false
+				for _, w := range warnings {
+					found = found || w.Path == "#/"+keyword
+				}
+				if !found {
+					t.Fatal("missing root constraint warning")
+				}
+				if schema[keyword] == nil {
+					t.Fatal("mutated caller schema")
+				}
+			}
+		})
+	}
+}
+
+func TestGoogleOneOfFallbackDoesNotIntroduceRejectedAnyOf(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{"x":{"type":"integer","oneOf":[{"minimum":3},{"maximum":5}]}},"required":["x"]}`)
+	got, err := New(Config{AllowUnsupported: true, Warn: quiet}, Target{"google", "vercel-native"}).Prepare(t.Context(), tools(&genai.FunctionDeclaration{Name: "test", ParametersJsonSchema: raw}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := got["test"].Schema["properties"].(map[string]any)["x"].(map[string]any)
+	if field["anyOf"] != nil || field["oneOf"] != nil || field["type"] != "integer" {
+		t.Fatalf("unexpected widening: %v", field)
+	}
+}
+
+func TestNullableEnumEquivalentClaudeShape(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{"x":{"description":"Pick a colour","anyOf":[{"type":"string","enum":["red"]},{"type":"null"}]}},"required":["x"],"additionalProperties":false}`)
+	fd := &genai.FunctionDeclaration{Name: "test", ParametersJsonSchema: raw}
+	original, err := canonical(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := New(Config{}, Target{"anthropic", "vertex"}).Prepare(t.Context(), tools(fd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := got["test"].Schema["properties"].(map[string]any)["x"].(map[string]any)
+	if field["anyOf"] != nil || field["description"] != "Pick a colour" {
+		t.Fatalf("unexpected nullable shape: %v", field)
+	}
+	for _, schema := range []map[string]any{original, got["test"].Schema} {
+		compiler := validator.NewCompiler()
+		if err := compiler.AddResource("urn:nullable", schema); err != nil {
+			t.Fatal(err)
+		}
+		compiled, err := compiler.Compile("urn:nullable")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range []any{nil, "red", "green", "", json.Number("1")} {
+			valid := value == nil || value == "red"
+			if err := compiled.Validate(map[string]any{"x": value}); (err == nil) != valid {
+				t.Fatalf("value %v validity mismatch: %v", value, err)
+			}
+		}
+	}
+}

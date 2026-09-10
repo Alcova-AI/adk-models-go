@@ -240,8 +240,13 @@ schema errors, unknown keywords or unresolved/external references.
 For OpenAI and Claude, schemas that meet the checked strict-mode requirements
 use `strict: true`. Open objects and, for OpenAI, optional fields that cannot
 be represented without changing the contract require the explicit opt-in and
-use `strict: false`. In particular, the adapter does not silently make optional
-fields required or invent nullability to satisfy OpenAI's automatic normalisation.
+use `strict: false`. On the Vercel Responses route for OpenAI, the Gateway still
+fills optional inputs. With explicit opt-in, the adapter allows null as an
+omission marker for optional non-nullable typed fields, asks the model to use
+it for absent inputs, and removes only these markers from final tool arguments.
+Required fields and existing nullable fields keep their meaning. This conversion
+walks direct properties and array items, not alternatives or references. This does not
+guarantee the model will omit every unrequested value; validate returned arguments.
 Compatibility checking is distinct from provider strict decoding.
 
 The current trial profiles are intentionally conservative:
@@ -249,13 +254,14 @@ The current trial profiles are intentionally conservative:
 | Route | Behaviour |
 |---|---|
 | OpenAI Responses, direct or Vercel | Standard JSON Schema subset; unsupported composition rules require opt-in. Optional fields retain their original meaning. |
-| Claude, direct or Vercel | Unsupported numeric bounds, length rules and unrestricted regex patterns require opt-in. Root-level schema rules are preserved. |
+| Claude, direct or Vercel | Unsupported numeric bounds, length rules and unrestricted regex patterns require opt-in. Root alternatives require opt-in removal because Claude rejects that shape. |
 | Gemini, direct or Vertex | `toolschema.WrapGemini` checks the input while the Google SDK retains ownership of its native typed format. |
-| Gemini through Vercel | Checks known additional losses in the public Google converter, including numeric bounds, pattern and maximum string length. |
+| Gemini through Vercel | Checks known additional losses in the public Google converter, including numeric bounds, pattern and maximum string length. Root alternatives require opt-in removal. |
 
 Presentation-only property ordering may be dropped with a warning. Unsupported
 assertions are removed only with opt-in; unsupported `oneOf` can become `anyOf`
-with an explicit exclusivity-loss warning. Local static references are checked,
+on OpenAI and Claude with an explicit exclusivity-loss warning. Google fallback
+removes `oneOf` because the converted alternative shape can be rejected. Local static references are checked,
 but reference conversion outside OpenAI and dynamic references remain errors
 in this trial rather than being silently erased. This is not a complete
 cross-provider JSON Schema implementation or a guarantee of business correctness.
@@ -325,6 +331,6 @@ Result directories contain synthetic schemas and arguments, not authentication
 headers or reasoning text. Treat new cases as public synthetic fixtures. The
 manifest records planned cases and source hashes; retain it with the raw results.
 
-The [10 September 2026 trial results](testdata/schema-matrix/2026-09-10.md)
-record known failures. The current catalogue remains provisional; do not treat
+The [initial 10 September 2026 trial](testdata/schema-matrix/2026-09-10.md)
+records the original failures. The [adapter fix verification](testdata/schema-matrix/2026-09-10-fixes.md) records subsequent corrections and remaining limits. The current catalogue remains provisional; do not treat
 this trial as approval to remove backend validation or deploy the adapter broadly.

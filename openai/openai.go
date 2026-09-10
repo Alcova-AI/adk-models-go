@@ -122,7 +122,8 @@ func (m *openAIModel) GenerateContent(ctx context.Context, req *model.LLMRequest
 	for i := range params.Tools {
 		if fn := params.Tools[i].OfFunction; fn != nil {
 			schema := prepared[fn.Name]
-			fn.Parameters = schema.Schema
+			fn.Parameters = nil
+			fn.SetExtraFields(map[string]any{"parameters": schema.JSONSchema})
 			if schema.Strict != nil {
 				fn.Strict = param.NewOpt(*schema.Strict)
 			}
@@ -133,9 +134,9 @@ func (m *openAIModel) GenerateContent(ctx context.Context, req *model.LLMRequest
 		return singleErrorSequence(err)
 	}
 	if stream {
-		return m.generateStream(ctx, params, requestOptions, requestIncludesThoughts(req))
+		return toolschema.RestoreOmissions(m.generateStream(ctx, params, requestOptions, requestIncludesThoughts(req)), prepared)
 	}
-	return m.generate(ctx, params, requestOptions, requestIncludesThoughts(req))
+	return toolschema.RestoreOmissions(m.generate(ctx, params, requestOptions, requestIncludesThoughts(req)), prepared)
 }
 
 func (m *openAIModel) convertRequest(req *model.LLMRequest) (responses.ResponseNewParams, error) {
