@@ -1,0 +1,151 @@
+{
+  "properties": {
+    "columns": {
+      "description": "Columns to compute and return. Only requested columns are computed.",
+      "items": {
+        "enum": [
+          "CLIENT_COLUMN_UNSPECIFIED",
+          "CLIENT_COLUMN_NEXT_MEETING_DATE",
+          "CLIENT_COLUMN_LAST_MEETING_DATE",
+          "CLIENT_COLUMN_RISK_PROFILE",
+          "CLIENT_COLUMN_ASSETS_UNDER_MANAGEMENT",
+          "CLIENT_COLUMN_LAST_CONTACTED_AT",
+          "CLIENT_COLUMN_TOTAL_ACCOUNTS",
+          "CLIENT_COLUMN_PRIMARY_CONTACT_EMAIL",
+          "CLIENT_COLUMN_ADVISER_NAME",
+          "CLIENT_COLUMN_TOTAL_CONTACTS",
+          "CLIENT_COLUMN_CONTACT_NAMES"
+        ],
+        "type": "STRING"
+      },
+      "type": "ARRAY"
+    },
+    "filter": {
+      "description": "Custom filter for user-defined views. Overrides view if set.",
+      "properties": {
+        "adviser_user_ids": {
+          "items": {
+            "type": "STRING"
+          },
+          "type": "ARRAY"
+        },
+        "has_financial_accounts": {
+          "type": "BOOLEAN"
+        },
+        "has_upcoming_meeting": {
+          "type": "BOOLEAN"
+        },
+        "last_contacted_after": {
+          "format": "date-time",
+          "type": "STRING"
+        },
+        "last_contacted_before": {
+          "format": "date-time",
+          "type": "STRING"
+        },
+        "max_aum_cents": {
+          "type": "INTEGER"
+        },
+        "min_aum_cents": {
+          "type": "INTEGER"
+        },
+        "name_contains": {
+          "type": "STRING"
+        },
+        "next_meeting_after": {
+          "format": "date-time",
+          "type": "STRING"
+        },
+        "next_meeting_before": {
+          "format": "date-time",
+          "type": "STRING"
+        },
+        "team_member_roles": {
+          "items": {
+            "enum": [
+              "TEAM_MEMBER_ROLE_UNSPECIFIED",
+              "TEAM_MEMBER_ROLE_ADVISER",
+              "TEAM_MEMBER_ROLE_ASSOCIATE",
+              "TEAM_MEMBER_ROLE_ASSISTANT",
+              "TEAM_MEMBER_ROLE_RELATIONSHIP_MANAGER",
+              "TEAM_MEMBER_ROLE_PARAPLANNER",
+              "TEAM_MEMBER_ROLE_PORTFOLIO_MANAGER"
+            ],
+            "type": "STRING"
+          },
+          "type": "ARRAY"
+        }
+      },
+      "type": "OBJECT"
+    },
+    "ids": {
+      "description": "Filter by specific household IDs.",
+      "items": {
+        "type": "STRING"
+      },
+      "type": "ARRAY"
+    },
+    "pagination": {
+      "description": "Standard pagination parameters.",
+      "properties": {
+        "after": {
+          "type": "STRING"
+        },
+        "before": {
+          "type": "STRING"
+        },
+        "first": {
+          "type": "INTEGER"
+        },
+        "last": {
+          "type": "INTEGER"
+        },
+        "order": {
+          "enum": [
+            "SORT_DIRECTION_UNSPECIFIED",
+            "SORT_DIRECTION_ASC",
+            "SORT_DIRECTION_DESC"
+          ],
+          "type": "STRING"
+        },
+        "order_by": {
+          "type": "STRING"
+        }
+      },
+      "type": "OBJECT"
+    },
+    "search": {
+      "description": "Full-text search across household name, contact names, and emails.",
+      "type": "STRING"
+    },
+    "view": {
+      "description": "Predefined view filter. Ignored if filter is set.",
+      "enum": [
+        "CLIENT_VIEW_UNSPECIFIED",
+        "CLIENT_VIEW_ALL",
+        "CLIENT_VIEW_MY_CLIENTS",
+        "CLIENT_VIEW_RECENTLY_CONTACTED",
+        "CLIENT_VIEW_NEEDS_ATTENTION",
+        "CLIENT_VIEW_UPCOMING_MEETINGS"
+      ],
+      "type": "STRING"
+    },
+    "with": {
+      "description": "Child resources to include in the response.",
+      "items": {
+        "enum": [
+          "CLIENT_EDGE_UNSPECIFIED",
+          "CLIENT_EDGE_CONTACTS",
+          "CLIENT_EDGE_ACCOUNTS",
+          "CLIENT_EDGE_FINANCIAL_ACCOUNTS",
+          "CLIENT_EDGE_TEAM_MEMBERS",
+          "CLIENT_EDGE_RECENT_MEETINGS",
+          "CLIENT_EDGE_ALL"
+        ],
+        "type": "STRING"
+      },
+      "type": "ARRAY"
+    }
+  },
+  "type": "OBJECT"
+}

@@ -32,12 +32,14 @@ import (
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	"github.com/Alcova-AI/adk-models-go/internal/metadata"
 	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
+	"github.com/Alcova-AI/adk-models-go/toolschema"
 	"google.golang.org/adk/v2/model"
 )
 
 const defaultMaxTokens = 16384
 
 type openAIModel struct {
+	schemas          *toolschema.Processor
 	client           openai.Client
 	canonicalModel   shared.ResponsesModel
 	requestModel     shared.ResponsesModel
@@ -82,8 +84,13 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if tokens == 0 {
 		tokens = defaultMaxTokens
 	}
+	route := "direct"
+	if cfg.Model.Vercel != nil {
+		route = "vercel-openai"
+	}
 	return &openAIModel{
-		client: cfg.Client, canonicalModel: shared.ResponsesModel(cfg.Model.CanonicalModel), requestModel: shared.ResponsesModel(requestModel),
+		schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
+		client:  cfg.Client, canonicalModel: shared.ResponsesModel(cfg.Model.CanonicalModel), requestModel: shared.ResponsesModel(requestModel),
 		defaultMaxTokens: tokens, reasoning: reasoningConfig{DefaultLevel: cfg.Model.Reasoning.DefaultLevel, OpenAI: cfg.Model.Reasoning.OpenAI, Family: f},
 		promptCaching: cache, vercel: cfg.Model.Vercel, family: f,
 	}, nil
@@ -104,18 +111,32 @@ func (m *openAIModel) GenerateContent(ctx context.Context, req *model.LLMRequest
 	if req == nil {
 		return singleErrorSequence(ErrRequestNil)
 	}
+	prepared, err := m.schemas.Prepare(ctx, toolschema.Tools(req))
+	if err != nil {
+		return singleErrorSequence(err)
+	}
 	params, err := m.convertRequest(req)
 	if err != nil {
 		return singleErrorSequence(err)
+	}
+	for i := range params.Tools {
+		if fn := params.Tools[i].OfFunction; fn != nil {
+			schema := prepared[fn.Name]
+			fn.Parameters = nil
+			fn.SetExtraFields(map[string]any{"parameters": schema.JSONSchema})
+			if schema.Strict != nil {
+				fn.Strict = param.NewOpt(*schema.Strict)
+			}
+		}
 	}
 	requestOptions, err := m.requestOptions(req, params.MaxOutputTokens.Or(0))
 	if err != nil {
 		return singleErrorSequence(err)
 	}
 	if stream {
-		return m.generateStream(ctx, params, requestOptions, requestIncludesThoughts(req))
+		return toolschema.RestoreOmissions(m.generateStream(ctx, params, requestOptions, requestIncludesThoughts(req)), prepared)
 	}
-	return m.generate(ctx, params, requestOptions, requestIncludesThoughts(req))
+	return toolschema.RestoreOmissions(m.generate(ctx, params, requestOptions, requestIncludesThoughts(req)), prepared)
 }
 
 func (m *openAIModel) convertRequest(req *model.LLMRequest) (responses.ResponseNewParams, error) {

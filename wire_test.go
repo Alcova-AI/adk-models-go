@@ -186,7 +186,7 @@ func TestGatewayForcedToolsSuppressAnthropicThinking(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cfg := &genai.GenerateContentConfig{ThinkingConfig: &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelHigh}, Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "save", Parameters: &genai.Schema{Type: genai.TypeObject}}}}}, ToolConfig: &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeAny}}}
+			cfg := &genai.GenerateContentConfig{ThinkingConfig: &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelHigh}, Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "save", ParametersJsonSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}}}}, ToolConfig: &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeAny}}}
 			request := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("save", genai.RoleUser)}, Config: cfg}
 			for _, err := range llm.GenerateContent(t.Context(), request, false) {
 				if err != nil {

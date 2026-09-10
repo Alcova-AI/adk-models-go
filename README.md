@@ -208,3 +208,60 @@ Existing adapter releases remain available during migration.
 ## Licence
 
 Apache License 2.0. See [LICENSE](LICENSE). Existing copyright notices and applicable [third-party attribution](THIRD_PARTY_NOTICES.md) are preserved.
+
+## Tool schema compatibility
+
+Providers support different parts of JSON Schema. The adapters check your tool
+schemas before sending a request and reject rules the selected provider cannot
+preserve. This check is enabled by default; no configuration is needed.
+
+Define each tool's inputs using **one** of these fields:
+
+- `Parameters`: a typed `genai.Schema`.
+- `ParametersJsonSchema`: a JSON-serialisable JSON Schema 2020-12 object.
+
+The root schema must describe an object. Do not set both fields on the same tool.
+
+### Allowing unsupported rules
+
+If a provider cannot support your schema, the default is to return an error.
+You can allow the adapter to remove or weaken unsupported rules:
+
+```go
+import "github.com/Alcova-AI/adk-models-go/toolschema"
+
+// In your model configuration:
+Model: adkmodels.ModelConfig{
+    CanonicalModel: "gpt-5.6-luna",
+    ToolSchemas: toolschema.Config{AllowUnsupported: true},
+}
+```
+
+Use this option only when your application validates tool arguments before
+executing them. The provider may return values that break the original rules.
+Invalid schemas, unknown keywords and unsupported references still return errors.
+
+The adapter logs a warning for each changed rule. Set `ToolSchemas.Warn` if you
+want to handle these warnings yourself. Warnings identify the tool and rule;
+they do not include schema values or tool arguments.
+
+### What to expect from each provider
+
+The adapters use strict mode where the provider can preserve the schema.
+Some schemas need the opt-in above, such as open objects, certain optional
+fields, or rules that a provider does not support. Even with strict mode,
+validate arguments before executing a tool.
+
+For OpenAI through Vercel Responses, the opt-in also handles optional,
+non-nullable typed fields: the model can return a null marker for an omitted
+field, and the adapter removes that marker from the final arguments. Required
+fields and fields that already allow null keep their meaning. This also covers
+named local references and simple nullable alternatives.
+
+All routes accept acyclic named local references (`#/$defs/name` or
+`#/definitions/name`). References stay in the same tool schema. External and
+recursive references, anchors and nested reference scopes are rejected;
+provider schema complexity limits still apply.
+
+See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes,
+results, provider-specific limits and instructions for running the tests.
