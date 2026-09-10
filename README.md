@@ -272,3 +272,59 @@ Sources for these profiles:
 
 The gateway's private downstream implementation is not inspected by this
 library. Live route tests are required before expanding a compatibility claim.
+
+### Repeatable live schema matrix
+
+The synthetic matrix compares the local catalogue with observed provider
+behaviour. It never executes tools. Ordinary tests do not make these paid calls.
+
+Provide `OPENAI_API_KEY`, `AI_GATEWAY_API_KEY`, `GOOGLE_CLOUD_PROJECT`, and
+`GOOGLE_CLOUD_LOCATION` (or `GOOGLE_CLOUD_REGION`), plus Google application
+default credentials with Vertex access. Missing credentials are setup failures.
+The pinned models are Luna, Haiku 4.5 and Gemini 3.1 Flash Lite; route definitions
+are in `schema_matrix_live_test.go`.
+
+```sh
+# Use a new, empty directory for every run.
+ADK_SCHEMA_LIVE=1 ADK_SCHEMA_OUTPUT="$PWD/dist/schema-matrix/run-1" \
+  go test . -run '^TestSchemaMatrixLive$' -parallel 8 -count=1 -timeout 25m
+python3 scripts/schema_matrix_report.py dist/schema-matrix/run-1 \
+  --output dist/schema-matrix/report-1
+```
+
+`ADK_SCHEMA_ROUTES`, `ADK_SCHEMA_CASES` and `ADK_SCHEMA_MODES` accept exact,
+comma-separated selections. Unknown or duplicate names fail. Modes are
+`default`, `fallback`, and `probe`; fallback runs only where default validation
+rejects the case. `ADK_SCHEMA_STREAM=1` repeats a selection using streaming.
+Leave it unset for ordinary responses. Repeat into separate output directories
+to measure variation without mixing observations.
+
+The default and fallback modes use the real adapter. Probe mode replaces a
+neutral schema with the original case at the final HTTP boundary, bypassing
+catalogue restrictions only in the test. For OpenAI and Claude probes this
+retains the neutral schema's `strict: true`; it does not probe non-strict API
+behaviour. Gemini has no equivalent strict flag. Captured schema fields show
+what was sent to the direct API or Gateway, not the Gateway's private downstream
+request. Native Vertex Gemini adapter cases include both raw and typed inputs;
+provider probes use raw JSON Schema.
+
+Each case has one valid and one deliberately conflicting prompt. Results record
+HTTP status, final tool names and arguments, response errors and stop reasons,
+original-schema conformance, prepared-schema conformance, and exact requested
+argument matching. Format validation is explicitly enabled in the local oracle.
+Claude forced-tool calls leave thinking unset; other routes use minimal thinking.
+
+A passing Go test means **collection completed**, not that all schemas were
+accepted or all arguments conformed. The report distinguishes local blocking,
+HTTP errors, missing/wrong/multiple calls, truncation, nonconforming arguments,
+and valid arguments that changed the requested values. It refuses incomplete or
+failed collections unless `--allow-incomplete` is explicitly used for exploration.
+Successful samples show observed conformance, not guaranteed enforcement.
+
+Result directories contain synthetic schemas and arguments, not authentication
+headers or reasoning text. Treat new cases as public synthetic fixtures. The
+manifest records planned cases and source hashes; retain it with the raw results.
+
+The [10 September 2026 trial results](testdata/schema-matrix/2026-09-10.md)
+record known failures. The current catalogue remains provisional; do not treat
+this trial as approval to remove backend validation or deploy the adapter broadly.
