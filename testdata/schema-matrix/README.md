@@ -1,182 +1,78 @@
 # Live tool schema matrix
 
-Last tested: **10 September 2026** (Australia/Melbourne).
+Last tested: **10 September 2026**.
 
-## Scope
+The normal adapters were tested on ten routes with **41 non-streaming cases** and **14 streaming cases**, including four inline/reference pairs. Each case requests valid arguments and deliberately conflicting arguments. No tools execute. These are synthetic observations, not production success rates or guaranteed enforcement.
 
-39 schema cases, including six new paired inline/reference cases tested in both non-streaming and streaming modes. Each case requests one valid and one conflicting argument object. Default mode rejects unsupported contracts locally; fallback mode runs only when default mode rejects the schema and explicitly allows weaker enforcement. No tools or customer actions execute.
+| Run | Records including local blocks | HTTP attempts | Exact valid samples | Valid samples changed |
+|---|---:|---:|---:|---:|
+| Non-streaming | 1,304 | 820 | 406/410 | 4 |
+| Streaming | 418 | 280 | 138/140 | 2 |
 
-| Route label | Model | Connection |
-|---|---|---|
-| luna-direct | `gpt-5.6-luna` | OpenAI Responses |
-| luna-native / luna-responses | `gpt-5.6-luna` | Vercel native / Responses |
-| haiku-vertex | `claude-haiku-4-5` | Vertex |
-| haiku-native / haiku-messages | `anthropic/claude-haiku-4.5` | Vercel native / Messages |
-| gemini-vertex | `gemini-3.1-flash-lite` | Vertex |
-| gemini-native / gemini-responses / gemini-messages | `google/gemini-3.1-flash-lite` | Vercel native / Responses / Messages |
+No HTTP request was rejected in these collections. Four conflicting streaming samples failed while producing or parsing tool arguments. The default rejects unsupported rules locally; fallback explicitly allows weaker enforcement and runs only when default rejects the schema. The tables below use fallback where necessary. Local blocks make no HTTP request. These runs use normal adapter paths, not provider probes.
 
-The original 33-case baseline covered **10 routes**, 1,266 records and 766 HTTP attempts. **383/383 valid attempted requests** returned the requested valid arguments. Local rejections make no HTTP request. These baseline totals exclude the new reference comparison below and are test observations, not production success rates.
+## Observed results
 
-## Supported behaviour and limits
+**S**: both samples conformed and the valid sample matched exactly. **W**: a sample broke the schema or changed requested arguments. **E**: a call failed. Each cell is **non-streaming / streaming**; a dash means streaming was not selected. These classifications report samples, not a promise that a provider enforces the rule.
 
-- Numeric schema bounds, cardinalities and enum values retain their numeric JSON representation. Wire tests also preserve integers above JavaScript’s exact-integer range.
-- Typed and raw nullable enums accept null in the tested routes. Claude uses an equivalent type-union form; direct/Vertex nullable enums require explicit best-effort permission because strict mode rejects that form.
-- OpenAI through Vercel Responses supports omission of optional non-nullable typed fields through an explicit fallback: the adapter sends null markers and removes only those markers from final arguments. Required values, real nulls and zero are preserved. Conversion covers direct properties and array items, not alternatives or references.
-- The original client-list schema passed three additional authenticated backend samples through Vercel Responses, including the real argument decoder, protobuf validation and pagination parser.
-- Unsupported constraints fail locally by default. With explicit fallback, they may be removed or weakened with warnings. Claude and Gemini Gateway root alternatives require this fallback; Claude and Google oneOf are removed instead of converted to rejected shapes.
-- Static local references remain supported only on OpenAI routes in this adapter. Other reference conversions remain local errors, including with fallback enabled.
-- Schema acceptance and a strict flag do not guarantee argument enforcement. Backend validation remains required. The tables below distinguish adapter support from provider-only probes and observed conformance.
-
-## Non-streaming results
-
-Each cell describes the valid/conflicting pair using default mode where available, otherwise explicit fallback:
-
-- **S**: both returned argument objects satisfied the original schema; the valid request also matched exactly.
-- **W**: at least one returned argument object violated the original schema.
-- **E**: at least one call failed, was interrupted, or produced malformed arguments.
-- **L**: the adapter rejected the schema even with fallback.
-- **\***: explicit fallback was required. Even **S\*** does not mean the original constraints were preserved or enforced by the provider.
-
-A single pair is a small sample. **S** means observed conformance for this model and route, not guaranteed support for every combination of the rule.
-
-| Rule | luna-direct | luna-native | luna-responses | haiku-vertex | haiku-native | haiku-messages | gemini-vertex | gemini-native | gemini-responses | gemini-messages |
+| Rule | gemini-messages | gemini-native | gemini-responses | gemini-vertex | haiku-messages | haiku-native | haiku-vertex | luna-direct | luna-native | luna-responses |
 |---|---|---|---|---|---|---|---|---|---|---|
-| allOf | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
-| anyOf | S | S | S | S | W | W | S | S* | S* | S* |
-| closed-object | S | S | S | S | S | S | S | S* | S* | S* |
-| const | W* | W* | W* | S | S | W | W* | S* | S* | S* |
-| enum | S | S | S | S | S | W | S | S* | S* | S* |
-| exclusiveMaximum | S | S | S | W* | W* | W* | W* | W* | W* | W* |
-| exclusiveMinimum | S | S | S | W* | W* | W* | W* | W* | W* | W* |
-| format-date | S | S | S | S | W | W | S | S* | S* | S* |
-| integer | S | S | S | S | S | W | S | S* | S* | S* |
-| legacy-list-clients-typed | W* | W* | S* | W* | W* | W* | S | S | S | S |
-| local-ref | S | S | S | L | L | L | L | L | L | L |
-| maxItems | S | S | S | W* | W* | W* | S | S* | W* | W* |
-| maxLength | S | S | S | W* | W* | W* | S | W* | W* | W* |
-| maxProperties | W* | W* | W* | W* | W* | W* | W | W* | W* | W* |
-| maximum | S | S | S | W* | W* | W* | S | W* | W* | W* |
-| minItems-one | S | S | S | S | S | W | S | S* | W* | W* |
-| minItems-two | S | S | S | W* | W* | W* | S | S* | W* | W* |
-| minItems-two-typed | W* | W* | S* | W* | W* | W* | S | S | W | W |
-| minLength | S | S | S | W* | W* | W* | W | W* | W* | W* |
-| minProperties | W* | W* | W* | W* | W* | W* | W | W* | W* | W* |
-| minimum | S | S | S | W* | W* | W* | S | W* | W* | W* |
-| multipleOf | S | S | E | W* | W* | W* | W* | W* | W* | W* |
-| nullable-enum | S | S | S | W* | W | W | S | S* | S* | S* |
-| nullable-enum-typed | W* | W* | S* | W* | W* | W* | S | S | S | S |
-| oneOf | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
-| optional-pagination | W* | W* | S* | W* | W* | W* | S | S | S | S |
-| optional-pagination-typed | W* | W* | S* | W* | W* | W* | S | S | S | S |
-| pagination-not | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
-| pattern | S | S | S | W* | W* | W* | S | W* | W* | W* |
-| required | S | S | S | S | S | W | S | S* | S* | S* |
-| root-anyOf | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
-| root-oneOf | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
-| uniqueItems | W* | W* | W* | W* | W* | W* | W* | W* | W* | W* |
-| nullable-object-inline | S | S | S | S | S | W | S | S* | S* | S* |
-| nullable-object-ref | S | S | S | L | L | L | L | L | L | L |
-| optional-object-inline | W* | W* | W* | S | S | W | S | S* | S* | S* |
-| optional-object-ref | W* | W* | W* | L | L | L | L | L | L | L |
-| repeated-object-inline | S | S | S | S | S | W | S | S* | S* | S* |
-| repeated-object-ref | S | S | S | L | L | L | L | L | L | L |
+| allOf | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - |
+| anyOf | S / - | S / - | S / - | S / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| closed-object | S / - | S / - | S / - | S / - | S / - | S / - | S / - | S / - | S / - | S / - |
+| const | S / - | S / - | S / - | W / - | W / - | S / - | S / - | W / - | W / - | W / - |
+| enum | S / - | S / - | S / - | S / - | W / - | S / - | S / - | S / - | S / - | S / - |
+| exclusiveMaximum | W / - | W / - | W / - | W / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| exclusiveMinimum | W / - | W / - | W / - | W / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| format-date | S / - | S / - | S / - | S / - | W / - | S / - | S / - | S / - | S / - | S / - |
+| integer | S / - | S / - | S / - | S / - | W / - | S / - | S / - | S / - | S / - | S / - |
+| legacy-list-clients-typed | S / S | S / S | S / S | S / S | W / W | W / W | W / W | W / W | W / W | S / S |
+| local-ref | S / - | S / - | S / - | S / - | W / - | S / - | S / - | S / - | S / - | S / - |
+| maxItems | W / - | S / - | W / - | S / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| maxLength | W / - | W / - | W / - | S / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| maxProperties | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - |
+| maximum | W / - | W / - | W / - | S / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| minItems-one | W / W | S / S | W / W | S / S | W / W | S / S | S / S | S / S | S / S | S / S |
+| minItems-two | W / - | S / - | W / - | S / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| minItems-two-typed | W / - | S / - | W / - | S / - | W / - | W / - | W / - | W / - | W / - | S / - |
+| minLength | W / - | W / - | W / - | W / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| minProperties | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - |
+| minimum | W / W | W / W | W / W | S / S | W / W | W / W | W / W | S / S | S / S | S / S |
+| multipleOf | W / - | W / - | W / - | W / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| nullable-enum | S / - | S / - | S / - | S / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| nullable-enum-typed | S / S | S / S | S / S | S / S | W / W | W / W | W / W | W / W | W / W | S / S |
+| nullable-object-inline | S / S | S / S | S / S | S / S | W / W | S / S | S / S | S / S | S / S | S / S |
+| nullable-object-ref | S / S | S / S | S / S | S / S | W / W | S / S | S / S | S / S | S / S | S / S |
+| oneOf | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - |
+| optional-nonnullable-object-inline | S / S | S / S | S / S | S / S | W / W | S / S | S / S | W / W | W / W | S / S |
+| optional-nonnullable-object-ref | S / S | S / S | S / S | S / S | W / W | S / S | S / S | W / W | W / W | S / S |
+| optional-object-inline | S / S | S / S | S / S | S / S | W / W | S / S | S / S | W / W | W / W | W / W |
+| optional-object-ref | S / S | S / S | S / S | S / S | W / W | S / S | S / S | W / W | W / W | W / W |
+| optional-pagination | S / S | S / S | S / S | S / S | W / E | W / E | W / W | W / W | W / W | S / S |
+| optional-pagination-typed | S / S | S / S | S / S | S / S | W / E | W / E | W / W | W / W | W / W | S / S |
+| pagination-not | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - |
+| pattern | W / - | W / - | W / - | W / - | W / - | W / - | W / - | S / - | S / - | S / - |
+| repeated-object-inline | S / S | S / S | S / S | S / S | W / W | S / S | S / S | S / S | S / S | S / S |
+| repeated-object-ref | S / S | S / S | S / S | S / S | W / W | W / S | W / S | S / S | S / S | S / S |
+| required | S / - | S / - | S / - | S / - | W / - | S / - | S / - | S / - | S / - | S / - |
+| root-anyOf | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - |
+| root-oneOf | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - |
+| uniqueItems | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - | W / - |
 
-## Streaming coverage
+## Reference support and limits
 
-Tested `minimum`, `minItems-one`, typed nullable enum, raw and typed optional pagination, and the original typed client-list schema on the completed routes. Only final tool calls are judged or passed to backend validation; partial deltas remain provider-native.
+The four paired fixtures cover repeated nested objects, explicit null, omission of an optional nullable object, and omission of an optional non-nullable object. References span two definition levels, direct properties and array items. All ten routes accepted the referenced fixtures through their normal adapters; optional/open shapes still need fallback on some routes.
 
-| Route | Valid requests matching exactly | Call errors |
-|---|---:|---:|
-| luna-direct | 6/6 | 0 |
-| luna-native | 6/6 | 0 |
-| luna-responses | 6/6 | 0 |
-| haiku-vertex | 6/6 | 0 |
-| haiku-native | 6/6 | 2 |
-| haiku-messages | 6/6 | 2 |
-| gemini-vertex | 6/6 | 0 |
-| gemini-native | 6/6 | 0 |
-| gemini-responses | 6/6 | 0 |
-| gemini-messages | 6/6 | 0 |
+- Haiku through Vertex and the native Gateway changed requested data in one valid non-streaming repeated-reference sample each. Their streaming samples matched. Accepted schemas do not imply exact model output.
+- OpenAI through Vercel Responses added `secondary: null` when asked to omit an optional nullable object, with both inline and referenced schemas and in both response modes. This satisfies the schema but changes the requested arguments. Real nulls are deliberately preserved because callers can distinguish null from absence.
+- The optional non-nullable pair returned exact valid arguments on every route in both modes. On OpenAI Vercel Responses, the adapter restores omission markers through named references and simple nullable alternatives, preserving required values and genuine nulls.
+- Four conflicting streaming pagination samples failed: two truncated calls on Haiku Messages and two malformed argument objects on Haiku native Gateway. These errors remain visible to callers.
+- Numeric JSON schema values retain their numeric representation. Independent wire tests cover integers above JavaScript's exact-integer range.
+- Large schemas and keyword combinations can still exceed provider limits. These fixtures do not prove acceptance of arbitrary application schemas. Gateway downstream conversion and billed schema tokens are not visible.
 
-## Failure observations
+The previous provider probes motivated this support but did not establish adapter support. The current results supersede those probe-only claims. Definitions are local to one tool schema and are sent in the same request; they are not shared across tools or requests.
 
-- `haiku-messages`, `optional-pagination`: 1 malformed or interrupted call(s), all from conflicting prompts.
-- `haiku-messages`, `optional-pagination-typed`: 1 malformed or interrupted call(s), all from conflicting prompts.
-- `haiku-native`, `optional-pagination`: 1 malformed or interrupted call(s), all from conflicting prompts.
-- `haiku-native`, `optional-pagination-typed`: 1 malformed or interrupted call(s), all from conflicting prompts.
-- `luna-responses`, `multipleOf`: 1 malformed or interrupted call(s), all from conflicting prompts.
-
-Conflicting prompts also produced schema violations, particularly under explicit fallback and on Claude Gateway routes. Errors remain visible to callers and are not treated as successful tool execution.
-
-## Reproduction and evidence
-
-See the [live-matrix instructions](#repeatable-live-schema-matrix). The maintained fixtures and independent positive/negative oracles live in `schema_matrix_cases_test.go`. Wire tests check serialisation separately from provider behaviour.
-
-Each raw run retains its collection manifest, planned case identities, source hashes, outgoing schema, strict flags, warnings, HTTP status, final tool name, stop reason, errors and argument-validation results. Source manifests identify the implementation tested by each run. For repeated route/case pairs, the latest complete run replaces the earlier results. Raw provider probes are available as a separate mode; the results above use the checked adapter paths, not probes.
-
-Coverage does not establish all schema dialects, keyword combinations, formats, model versions or complexity limits. Claude direct coverage means Vertex, not the Anthropic-hosted endpoint; Gemini direct coverage means Vertex, not the Developer API. Gateway downstream requests are not visible.
-
-## Repeated-object reference comparison
-
-Last tested: **10 September 2026**. Each pair uses the same argument contract and prompts: one schema repeats the objects inline, the other uses `$defs` and local `$ref`. References span two definition levels, direct properties and array items. Separate pairs cover explicit null and omission of an optional nullable object. These are synthetic tool definitions, not production RPC schemas.
-
-This comparison contains 678 records and 422 HTTP attempts across all ten routes. Of 211 valid attempted requests, 195 returned the exact requested arguments. Counts include adapter calls and separate provider probes; local blocks make no HTTP request.
-
-### Adapter results
-
-The main table above includes the new non-streaming cases. Streaming produced the same S/W/L classifications for all six new cases. The adapter still blocks references on Claude and Gemini, including fallback. OpenAI routes accept the repeated and nullable reference schemas; optional schemas require fallback. No production reference support was added by this comparison.
-
-### Provider probes
-
-Probes bypass the local adapter check and replace the schema at the final HTTP boundary. **S** means both samples conformed and the valid sample matched exactly; **W** means a violation or changed valid arguments; **E** means an API or call error. Each cell is **non-streaming / streaming**. These observations do not establish end-to-end adapter support.
-
-| Route | Repeated objects with refs | Nullable object with refs | Optional object with refs |
-|---|---|---|---|
-| luna-direct | S / S | S / S | E / E |
-| luna-native | S / S | S / S | E / E |
-| luna-responses | S / S | S / S | W / W |
-| haiku-vertex | S / S | S / S | S / S |
-| haiku-native | S / S | S / S | S / S |
-| haiku-messages | W / W | W / W | W / W |
-| gemini-vertex | S / S | S / S | S / S |
-| gemini-native | S / S | S / S | S / S |
-| gemini-responses | S / S | S / S | S / S |
-| gemini-messages | S / S | S / S | S / S |
-
-- All ten routes accepted the repeated and explicit-null reference probes, and all their valid samples matched exactly. Claude through the Messages Gateway returned the invalid requested country in conflicting prompts, for both inline and reference forms.
-- Optional-object probes on direct OpenAI and the native OpenAI Gateway returned HTTP 400 because probe mode retains `strict: true` while the schema has an optional property. The inline controls failed identically. These are strict-mode shape rejections, not evidence that references are unsupported.
-- OpenAI through Vercel Responses added `"secondary": null` when the valid prompt omitted that property, with both inline and reference forms, in both adapter fallback and probes. No secondary object data was invented in these samples. The returned object satisfied the schema but did not match the requested arguments. Whether this changes execution depends on the caller: some tools treat null as omission, while others distinguish null from an absent property. The existing omission conversion does not cover references or nullable alternatives.
-- Claude and Gemini reference probes are promising, but their normal adapter paths remain blocked. Gateway wire captures confirm refs reached the Gateway; its private downstream conversion and billed schema token count are not visible.
-
-### Schema size
-
-Compact JSON token estimates using `o200k_base`, before provider conversion:
-
-| Paired fixture | Inline | References |
-|---|---:|---:|
-| repeated-object | 265 | 158 |
-| nullable-object | 187 | 147 |
-| optional-object | 185 | 145 |
-
-These are input-schema estimates, not provider-reported billing tokens. The definitions are sent once per tool schema; they are not shared across tools or requests.
-
-### Reproduce this comparison
-
-Run the following after configuring the API keys and Google credentials described below. Use a fresh output directory each time. Vertex Gemini uses `global`; Vertex Claude uses `us-east5` for this comparison. The first command covers the other nine routes.
-
-```sh
-export ADK_SCHEMA_CASES=local-ref,repeated-object-inline,repeated-object-ref,nullable-object-inline,nullable-object-ref,optional-object-inline,optional-object-ref
-export ADK_SCHEMA_MODES=default,fallback,probe
-ADK_SCHEMA_LIVE=1 GOOGLE_CLOUD_LOCATION=us-east5 \
-  ADK_SCHEMA_ROUTES=luna-direct,luna-native,luna-responses,haiku-vertex,haiku-native,haiku-messages,gemini-native,gemini-responses,gemini-messages \
-  ADK_SCHEMA_OUTPUT="$PWD/dist/schema-matrix/refs-other" \
-  go test . -run '^TestSchemaMatrixLive$' -parallel 8 -count=1 -timeout 12m
-ADK_SCHEMA_LIVE=1 GOOGLE_CLOUD_LOCATION=global ADK_SCHEMA_ROUTES=gemini-vertex \
-  ADK_SCHEMA_OUTPUT="$PWD/dist/schema-matrix/refs-gemini" \
-  go test . -run '^TestSchemaMatrixLive$' -parallel 8 -count=1 -timeout 12m
-```
-
-Repeat with `ADK_SCHEMA_STREAM=1`, new output directories and the six object cases (omit `local-ref`) for the streaming comparison. The initial Gemini attempt in `us-east5` returned model-route 404 errors; the complete `global` rerun supersedes those observations. Raw manifests retain both runs.
+Raw runs and manifests are retained under `dist/schema-matrix/reference-support-{full,stream}-{other,gemini}`. Manifests record tested source hashes. The result summaries are generated by `scripts/schema_matrix_report.py`. Claude native coverage means Vertex, not Anthropic's hosted endpoint; Gemini native coverage means Vertex, not the Developer API.
 
 ## Compatibility reference and running the matrix
 
@@ -215,7 +111,7 @@ fills optional inputs. With explicit opt-in, the adapter allows null as an
 omission marker for optional non-nullable typed fields, asks the model to use
 it for absent inputs, and removes only these markers from final tool arguments.
 Required fields and existing nullable fields keep their meaning. This conversion
-walks direct properties and array items, not alternatives or references. This does not
+walks direct properties, array items, named local references with annotation-only siblings, and simple value-or-null alternatives. It does not traverse arbitrary alternatives or references with assertion siblings. This does not
 guarantee the model will omit every unrequested value; validate returned arguments.
 Compatibility checking is distinct from provider strict decoding.
 
@@ -231,9 +127,7 @@ Compatibility profiles are conservative:
 Presentation-only property ordering may be dropped with a warning. Unsupported
 assertions are removed only with opt-in; unsupported `oneOf` can become `anyOf`
 on OpenAI with an explicit exclusivity-loss warning. Claude and Google fallback
-remove `oneOf` because the converted alternative shape can be rejected. Local static references are checked,
-but reference conversion outside OpenAI and dynamic references remain errors
-rather than being silently erased. This is not a complete
+remove `oneOf` because the converted alternative shape can be rejected. Named local references (`#/$defs/name` or `#/definitions/name`) are checked and retained on every provider route. They must be acyclic. External references, anchors, root references, nested `$id` scopes and dynamic references remain errors, even with fallback enabled. Claude also rejects references inside `allOf`. This is not a complete
 cross-provider JSON Schema implementation or a guarantee of business correctness.
 Provider model availability, schema complexity limits and model-specific
 restrictions still apply. Validate actual arguments before execution.

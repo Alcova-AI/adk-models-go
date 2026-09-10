@@ -255,7 +255,13 @@ validate arguments before executing a tool.
 For OpenAI through Vercel Responses, the opt-in also handles optional,
 non-nullable typed fields: the model can return a null marker for an omitted
 field, and the adapter removes that marker from the final arguments. Required
-fields and fields that already allow null keep their meaning.
+fields and fields that already allow null keep their meaning. This also covers
+named local references and simple nullable alternatives.
+
+All routes accept acyclic named local references (`#/$defs/name` or
+`#/definitions/name`). References stay in the same tool schema. External and
+recursive references, anchors and nested reference scopes are rejected;
+provider schema complexity limits still apply.
 
 See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes,
 results, provider-specific limits and instructions for running the tests.

@@ -4,6 +4,7 @@ package toolschema
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"slices"
 	"strings"
@@ -21,7 +22,45 @@ type omissionPlan struct {
 // Encode absence as null on that route, then restore absence in final arguments.
 // Existing nullable values retain their meaning; this is never a blanket null scrub.
 func (p *Processor) encodeOmissions(ctx context.Context, tool string, schema map[string]any, path string) (*omissionPlan, error) {
+	encoder := omissionEncoder{processor: p, ctx: ctx, tool: tool, root: schema, references: map[string]*omissionPlan{}}
+	return encoder.plan(schema, path)
+}
+
+type omissionEncoder struct {
+	processor  *Processor
+	ctx        context.Context
+	tool       string
+	root       map[string]any
+	references map[string]*omissionPlan
+}
+
+func (e *omissionEncoder) plan(schema map[string]any, path string) (*omissionPlan, error) {
+	if ref, ok := schema["$ref"].(string); ok && referenceWithAnnotations(schema) {
+		if target, found := definition(e.root, ref); found {
+			if plan, seen := e.references[ref]; seen {
+				return plan, nil
+			}
+			plan, err := e.plan(target, ref)
+			if err != nil {
+				return nil, err
+			}
+			e.references[ref] = plan
+			return plan, nil
+		}
+	}
+	// A value-or-null union is unambiguous. Follow its value branch for nested
+	// omissions, but never turn its legitimate outer null into absence.
+	if value, index := nullableValue(schema); value != nil {
+		return e.plan(value, fmt.Sprintf("%s/anyOf/%d", path, index))
+	}
 	plan := &omissionPlan{properties: map[string]*omissionPlan{}}
+	if err := e.fill(plan, schema, path); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func (e *omissionEncoder) fill(plan *omissionPlan, schema map[string]any, path string) error {
 	required, _ := schema["required"].([]any)
 	props, _ := schema["properties"].(map[string]any)
 	for _, name := range sortedKeys(props) {
@@ -29,15 +68,14 @@ func (p *Processor) encodeOmissions(ctx context.Context, tool string, schema map
 		if !ok {
 			continue
 		}
-		childPlan, err := p.encodeOmissions(ctx, tool, child, path+"/properties/"+escape(name))
+		childPlan, err := e.plan(child, path+"/properties/"+escape(name))
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if !slices.Contains(required, any(name)) && excludesNull(child) {
-			if err := p.loss(ctx, tool, path+"/properties/"+escape(name), "optional", "encode omitted fields as null for Vercel Responses; restore absence in returned arguments"); err != nil {
-				return nil, err
+		if !slices.Contains(required, any(name)) && referencedExcludesNull(e.root, child, map[string]bool{}) {
+			if err := e.processor.loss(e.ctx, e.tool, path+"/properties/"+escape(name), "optional", "encode omitted fields as null for Vercel Responses; restore absence in returned arguments"); err != nil {
+				return err
 			}
-			// Keep annotations on the outer schema, so the model sees the omission rule.
 			value := map[string]any{}
 			for key, v := range child {
 				value[key] = v
@@ -52,26 +90,68 @@ func (p *Processor) encodeOmissions(ctx context.Context, tool string, schema map
 			description, _ := child["description"].(string)
 			child["description"] = strings.TrimSpace(description + " Use null when this input was not provided; do not invent a value.")
 			child["anyOf"] = []any{value, map[string]any{"type": "null"}}
-			childPlan.omitNull = true
+			// A definition can be used by both required and optional properties.
+			// Only this occurrence owns the omission marker, never the shared plan.
+			copyPlan := *childPlan
+			copyPlan.omitNull = true
+			childPlan = &copyPlan
 		}
-		if childPlan.omitNull || len(childPlan.properties) > 0 || childPlan.items != nil {
-			plan.properties[name] = childPlan
-		}
+		plan.properties[name] = childPlan
 	}
 	if items, ok := schema["items"].(map[string]any); ok {
-		child, err := p.encodeOmissions(ctx, tool, items, path+"/items")
+		child, err := e.plan(items, path+"/items")
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if len(child.properties) > 0 || child.items != nil {
-			plan.items = child
-		}
+		plan.items = child
 	}
-	return plan, nil
+	return nil
 }
 
-// Only unambiguous typed schemas are widened. Alternatives already used to
-// represent nullable values, references and untyped schemas keep their semantics.
+func referenceWithAnnotations(schema map[string]any) bool {
+	for key := range schema {
+		if !slices.Contains([]string{"$ref", "description", "title", "default", "examples", "deprecated", "readOnly", "writeOnly"}, key) {
+			return false
+		}
+	}
+	return true
+}
+
+func referencedExcludesNull(root, schema map[string]any, seen map[string]bool) bool {
+	if ref, ok := schema["$ref"].(string); ok && referenceWithAnnotations(schema) {
+		if seen[ref] {
+			return false
+		}
+		seen[ref] = true
+		if target, found := definition(root, ref); found {
+			return referencedExcludesNull(root, target, seen)
+		}
+	}
+	return excludesNull(schema)
+}
+
+func nullableValue(schema map[string]any) (map[string]any, int) {
+	for key := range schema {
+		if !slices.Contains([]string{"anyOf", "description", "title", "default", "examples", "deprecated", "readOnly", "writeOnly"}, key) {
+			return nil, 0
+		}
+	}
+	branches, ok := schema["anyOf"].([]any)
+	if !ok || len(branches) != 2 {
+		return nil, 0
+	}
+	for i, branch := range branches {
+		null, ok := branch.(map[string]any)
+		if ok && len(null) == 1 && null["type"] == "null" {
+			value, _ := branches[1-i].(map[string]any)
+			return value, 1 - i
+		}
+	}
+	return nil, 0
+}
+
+// Only unambiguous non-nullable types are widened. Arbitrary alternatives
+// and untyped schemas keep their semantics.
 func excludesNull(schema map[string]any) bool {
 	switch typ := schema["type"].(type) {
 	case string:

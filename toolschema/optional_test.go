@@ -77,3 +77,51 @@ func TestOtherRoutesDoNotEncodeOmissions(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesReferencedOmissionsKeepRequiredAndRealNulls(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{"required_item":{"$ref":"#/$defs/Item"},"optional_item":{"$ref":"#/$defs/Alias"},"nullable_item":{"anyOf":[{"$ref":"#/$defs/Item"},{"type":"null"}]},"rows":{"type":"array","items":{"$ref":"#/$defs/Item"}}},"required":["required_item","nullable_item","rows"],"$defs":{"Alias":{"$ref":"#/$defs/Item"},"Item":{"type":"object","properties":{"count":{"type":"integer"},"explicit":{"anyOf":[{"type":"integer"},{"type":"null"}]}},"required":["explicit"]}}}`)
+	prepared, err := New(Config{AllowUnsupported: true, Warn: quiet}, Target{"openai", "vercel-openai"}).Prepare(t.Context(), tools(rawDeclaration(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := prepared["example"].Schema
+	validator := compileTestSchema(t, schema)
+	input := map[string]any{
+		"required_item": map[string]any{"count": float64(0), "explicit": nil},
+		"optional_item": nil,
+		"nullable_item": map[string]any{"count": nil, "explicit": nil},
+		"rows":          []any{map[string]any{"count": nil, "explicit": nil}},
+	}
+	if err := validator.Validate(input); err != nil {
+		t.Fatal(err)
+	}
+	result := prepared["example"].omissions.restore(input).(map[string]any)
+	if _, ok := result["optional_item"]; ok {
+		t.Fatal("optional reference null not restored to omission")
+	}
+	if result["required_item"].(map[string]any)["count"] != float64(0) {
+		t.Fatal("required shared definition or zero changed")
+	}
+	for _, item := range []any{result["nullable_item"], result["rows"].([]any)[0]} {
+		row := item.(map[string]any)
+		if _, ok := row["count"]; ok {
+			t.Fatal("nested reference omission not restored")
+		}
+		if v, ok := row["explicit"]; !ok || v != nil {
+			t.Fatal("legitimate null removed")
+		}
+	}
+	input["nullable_item"] = nil
+	result = prepared["example"].omissions.restore(input).(map[string]any)
+	if v, ok := result["nullable_item"]; !ok || v != nil {
+		t.Fatal("outer nullable reference changed")
+	}
+	input["required_item"] = nil
+	if validator.Validate(input) == nil {
+		t.Fatal("optional reference widened the required use of the definition")
+	}
+	result = prepared["example"].omissions.restore(input).(map[string]any)
+	if _, ok := result["required_item"]; !ok {
+		t.Fatal("required reference was treated as optional")
+	}
+}

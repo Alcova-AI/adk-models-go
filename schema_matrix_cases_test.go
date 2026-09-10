@@ -196,7 +196,12 @@ func repeatedObjectCases() []schemaCase {
 		if refs {
 			optional["$defs"] = map[string]any{"Address": address, "Contact": contact}
 		}
+		nonNullable := object(map[string]any{"primary": contactUse, "secondary": contactUse}, "primary")
+		if refs {
+			nonNullable["$defs"] = map[string]any{"Address": address, "Contact": contact}
+		}
 		cases = append(cases,
+			schemaCase{"optional-nonnullable-object-" + suffix, nonNullable, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"AU"}}}`, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"XX"}}}`, nil},
 			schemaCase{"optional-object-" + suffix, optional, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"AU"}}}`, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"XX"}}}`, nil},
 			schemaCase{"repeated-object-" + suffix, schema, valid, conflict, nil},
 			schemaCase{"nullable-object-" + suffix, nullable, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"AU"}},"secondary":null}`, `{"primary":{"name":"A","address":{"street":"1 Test St","city":"Melbourne","country":"XX"}},"secondary":null}`, nil},

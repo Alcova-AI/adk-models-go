@@ -80,6 +80,9 @@ func (p *Processor) Prepare(ctx context.Context, tools []*genai.Tool) (map[strin
 			if err != nil {
 				return nil, fmt.Errorf("tool %q: %w", fd.Name, err)
 			}
+			if err = checkReferences(schema, p.target.Provider); err != nil {
+				return nil, fmt.Errorf("tool %q: %w", fd.Name, err)
+			}
 			if err = p.adapt(ctx, fd.Name, schema, "#", 0); err != nil {
 				return nil, err
 			}

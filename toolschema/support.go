@@ -38,11 +38,6 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 		if key == "$dynamicRef" || key == "$recursiveRef" {
 			return fmt.Errorf("tool %q schema %s/%s: dynamic references are not supported by this trial", tool, path, key)
 		}
-		// Keep reference handling explicit. Dropping $ref would remove the whole
-		// referenced contract and can leave no usable tool shape.
-		if key == "$ref" && p.target.Provider != "openai" {
-			return fmt.Errorf("tool %q schema %s/$ref: reference conversion for %s/%s is not supported by this trial", tool, path, p.target.Provider, p.target.Route)
-		}
 		rootAlternative := path == "#" && (key == "anyOf" || key == "allOf") && (p.target.Provider == "anthropic" || (p.target.Provider == "google" && strings.HasPrefix(p.target.Route, "vercel")))
 		if rootAlternative || !p.supports(key, obj[key]) {
 			if err := p.loss(ctx, tool, path+"/"+escape(key), key, "constraint cannot be preserved by this route"); err != nil {

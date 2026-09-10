@@ -220,7 +220,7 @@ func TestSchemaMatrixLive(t *testing.T) {
 		}
 	}
 	hashes := map[string]string{}
-	for _, name := range []string{"schema_matrix_live_test.go", "schema_matrix_cases_test.go", "toolschema/schema.go", "toolschema/support.go", "toolschema/native.go", "toolschema/optional.go", "openai/openai.go", "anthropic/anthropic.go", "vercel/request.go", "vercel/response.go", "vercel/stream.go", "config.go", "openai/stream.go", "go.mod", "testdata/schema-matrix/legacy-list-clients.genai.json"} {
+	for _, name := range []string{"schema_matrix_live_test.go", "schema_matrix_cases_test.go", "toolschema/schema.go", "toolschema/support.go", "toolschema/native.go", "toolschema/optional.go", "toolschema/references.go", "openai/openai.go", "anthropic/anthropic.go", "vercel/request.go", "vercel/response.go", "vercel/stream.go", "config.go", "openai/stream.go", "go.mod", "testdata/schema-matrix/legacy-list-clients.genai.json"} {
 		b, e := os.ReadFile(name)
 		if e != nil {
 			t.Fatal(e)
