@@ -35,6 +35,9 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 			}
 			continue
 		}
+		if key == "$anchor" || key == "$dynamicAnchor" || key == "$recursiveAnchor" {
+			return fmt.Errorf("tool %q schema %s/%s: anchors are not supported", tool, path, key)
+		}
 		if key == "$dynamicRef" || key == "$recursiveRef" {
 			return fmt.Errorf("tool %q schema %s/%s: dynamic references are not supported by this trial", tool, path, key)
 		}
@@ -61,7 +64,7 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 
 func (p *Processor) supports(key string, value any) bool {
 	// Annotations are retained; they do not constitute enforced constraints.
-	if slices.Contains(strings.Fields(`type properties items required enum description title default examples deprecated readOnly writeOnly $id $anchor $defs definitions $ref anyOf`), key) {
+	if slices.Contains(strings.Fields(`type properties items required enum description title default examples deprecated readOnly writeOnly $id $defs definitions $ref anyOf`), key) {
 		return true
 	}
 	switch p.target.Provider {

@@ -67,3 +67,22 @@ func compileTestSchema(t *testing.T, schema map[string]any) *validator.Schema {
 	}
 	return compiled
 }
+
+func TestAnchorsRejected(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"object","$anchor":"Root"}`,
+		`{"type":"object","properties":{"value":{"type":"string","$anchor":"Value"}}}`,
+		`{"type":"object","properties":{"value":{"$ref":"#/$defs/Value"}},"$defs":{"Value":{"type":"string","$anchor":"Value"}}}`,
+		`{"type":"object","$dynamicAnchor":"Root"}`,
+		`{"type":"object","$recursiveAnchor":"Root"}`,
+	} {
+		for _, provider := range []string{"openai", "anthropic", "google"} {
+			for _, allow := range []bool{false, true} {
+				_, err := New(Config{AllowUnsupported: allow, Warn: quiet}, Target{provider, "direct"}).Prepare(t.Context(), tools(rawDeclaration(json.RawMessage(raw))))
+				if err == nil || !strings.Contains(err.Error(), "anchors are not supported") {
+					t.Fatalf("provider=%s fallback=%t schema=%s: expected anchor rejection, got %v", provider, allow, raw, err)
+				}
+			}
+		}
+	}
+}
