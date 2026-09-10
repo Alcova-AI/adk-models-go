@@ -211,128 +211,51 @@ Apache License 2.0. See [LICENSE](LICENSE). Existing copyright notices and appli
 
 ## Tool schema compatibility
 
-Every adapter checks function schemas before sending a request. Define inputs
-with either `FunctionDeclaration.Parameters` (`genai.Schema`) or
-`ParametersJsonSchema` (a JSON-serialisable schema object), never both. Tool
-schemas must have an object root. The raw form uses JSON Schema 2020-12 (other explicitly declared drafts are
-rejected rather than silently reinterpreted);
-OpenAPI `nullable` belongs in the typed form, where the adapter converts it to
-an `anyOf` null alternative. Property names and example/default/enum data are
-not treated as schema keywords.
+Providers support different parts of JSON Schema. The adapters check your tool
+schemas before sending a request and reject rules the selected provider cannot
+preserve. This check is enabled by default; no configuration is needed.
 
-The default rejects unsupported constraints. Callers that validate arguments
-before execution can explicitly permit weaker provider enforcement:
+Define each tool's inputs using **one** of these fields:
+
+- `Parameters`: a typed `genai.Schema`.
+- `ParametersJsonSchema`: a JSON-serialisable JSON Schema 2020-12 object.
+
+The root schema must describe an object. Do not set both fields on the same tool.
+
+### Allowing unsupported rules
+
+If a provider cannot support your schema, the default is to return an error.
+You can allow the adapter to remove or weaken unsupported rules:
 
 ```go
+import "github.com/Alcova-AI/adk-models-go/toolschema"
+
+// In your model configuration:
 Model: adkmodels.ModelConfig{
     CanonicalModel: "gpt-5.6-luna",
     ToolSchemas: toolschema.Config{AllowUnsupported: true},
 }
 ```
 
-Import `github.com/Alcova-AI/adk-models-go/toolschema`. The optional `Warn`
-callback receives the tool name, schema path, keyword, provider, route and
-reason. Without a callback, structured warnings use the default Go logger.
-Warnings are deduplicated per model instance with a bounded 256-entry cache;
-no schema values or arguments are logged. This option never suppresses malformed
-schema errors, unknown keywords or unresolved/external references.
+Use this option only when your application validates tool arguments before
+executing them. The provider may return values that break the original rules.
+Invalid schemas, unknown keywords and unsupported references still return errors.
 
-For OpenAI and Claude, schemas that meet the checked strict-mode requirements
-use `strict: true`. Open objects and, for OpenAI, optional fields that cannot
-be represented without changing the contract require the explicit opt-in and
-use `strict: false`. On the Vercel Responses route for OpenAI, the Gateway still
-fills optional inputs. With explicit opt-in, the adapter allows null as an
-omission marker for optional non-nullable typed fields, asks the model to use
-it for absent inputs, and removes only these markers from final tool arguments.
-Required fields and existing nullable fields keep their meaning. This conversion
-walks direct properties and array items, not alternatives or references. This does not
-guarantee the model will omit every unrequested value; validate returned arguments.
-Compatibility checking is distinct from provider strict decoding.
+The adapter logs a warning for each changed rule. Set `ToolSchemas.Warn` if you
+want to handle these warnings yourself. Warnings identify the tool and rule;
+they do not include schema values or tool arguments.
 
-Compatibility profiles are conservative:
+### What to expect from each provider
 
-| Route | Behaviour |
-|---|---|
-| OpenAI Responses, direct or Vercel | Standard JSON Schema subset; unsupported composition rules require opt-in. Optional fields retain their original meaning. |
-| Claude, direct or Vercel | Unsupported numeric bounds, length rules and unrestricted regex patterns require opt-in. Root alternatives require opt-in removal because Claude rejects that shape. Direct/Vertex nullable enums require explicit best-effort permission; Gateway nullable enums keep their checked strict-mode policy. |
-| Gemini, direct or Vertex | `toolschema.WrapGemini` checks the input while the Google SDK retains ownership of its native typed format. |
-| Gemini through Vercel | Checks known additional losses in the public Google converter, including numeric bounds, pattern and maximum string length. Root alternatives require opt-in removal. |
+The adapters use strict mode where the provider can preserve the schema.
+Some schemas need the opt-in above, such as open objects, certain optional
+fields, or rules that a provider does not support. Even with strict mode,
+validate arguments before executing a tool.
 
-Presentation-only property ordering may be dropped with a warning. Unsupported
-assertions are removed only with opt-in; unsupported `oneOf` can become `anyOf`
-on OpenAI with an explicit exclusivity-loss warning. Claude and Google fallback
-remove `oneOf` because the converted alternative shape can be rejected. Local static references are checked,
-but reference conversion outside OpenAI and dynamic references remain errors
-rather than being silently erased. This is not a complete
-cross-provider JSON Schema implementation or a guarantee of business correctness.
-Provider model availability, schema complexity limits and model-specific
-restrictions still apply. Validate actual arguments before execution.
+For OpenAI through Vercel Responses, the opt-in also handles optional,
+non-nullable typed fields: the model can return a null marker for an omitted
+field, and the adapter removes that marker from the final arguments. Required
+fields and fields that already allow null keep their meaning.
 
-Sources for these profiles:
-
-- [OpenAI strict tool calling](https://developers.openai.com/api/docs/guides/function-calling#strict-mode)
-- [OpenAI supported schemas](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas)
-- [Claude schema limitations](https://platform.claude.com/docs/en/build-with-claude/structured-outputs#json-schema-limitations)
-- [Google schema reference](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/Schema)
-- [Vercel Google converter at the protocol's pinned revision](https://github.com/vercel/ai/blob/fe86f8fb03a08af90b05cb79df66d3230d1e2666/packages/google/src/convert-json-schema-to-openapi-schema.ts)
-
-The gateway's private downstream implementation is not inspected by this
-library. Live route tests are required before expanding a compatibility claim.
-
-### Repeatable live schema matrix
-
-The synthetic matrix compares the local catalogue with observed provider
-behaviour. It never executes tools. Ordinary tests do not make these paid calls.
-
-Provide `OPENAI_API_KEY`, `AI_GATEWAY_API_KEY`, `GOOGLE_CLOUD_PROJECT`, and
-`GOOGLE_CLOUD_LOCATION` (or `GOOGLE_CLOUD_REGION`), plus Google application
-default credentials with Vertex access. Missing credentials are setup failures.
-The pinned models are Luna, Haiku 4.5 and Gemini 3.1 Flash Lite; route definitions
-are in `schema_matrix_live_test.go`.
-
-```sh
-# Use a new, empty directory for every run.
-ADK_SCHEMA_LIVE=1 ADK_SCHEMA_OUTPUT="$PWD/dist/schema-matrix/run-1" \
-  go test . -run '^TestSchemaMatrixLive$' -parallel 8 -count=1 -timeout 25m
-python3 scripts/schema_matrix_report.py dist/schema-matrix/run-1 \
-  --output dist/schema-matrix/report-1
-```
-
-`ADK_SCHEMA_ROUTES`, `ADK_SCHEMA_CASES` and `ADK_SCHEMA_MODES` accept exact,
-comma-separated selections. Unknown or duplicate names fail. Modes are
-`default`, `fallback`, and `probe`; fallback runs only where default validation
-rejects the case. `ADK_SCHEMA_STREAM=1` repeats a selection using streaming.
-Leave it unset for ordinary responses. Repeat into separate output directories
-to measure variation without mixing observations.
-
-The default and fallback modes use the real adapter. Probe mode replaces a
-neutral schema with the original case at the final HTTP boundary, bypassing
-catalogue restrictions only in the test. For OpenAI and Claude probes this
-retains the neutral schema's `strict: true`; it does not probe non-strict API
-behaviour. Gemini has no equivalent strict flag. Captured schema fields show
-what was sent to the direct API or Gateway, not the Gateway's private downstream
-request. Native Vertex Gemini adapter cases include both raw and typed inputs;
-provider probes use raw JSON Schema.
-
-Each case has one valid and one deliberately conflicting prompt. Results record
-HTTP status, final tool names and arguments, response errors and stop reasons,
-original-schema conformance, prepared-schema conformance, and exact requested
-argument matching. Format validation is explicitly enabled in the local oracle.
-Claude forced-tool calls leave thinking unset; other routes use minimal thinking.
-
-A passing Go test means **collection completed**, not that all schemas were
-accepted or all arguments conformed. The report distinguishes local blocking,
-HTTP errors, missing/wrong/multiple calls, truncation, nonconforming arguments,
-and valid arguments that changed the requested values. It refuses incomplete or
-failed collections unless `--allow-incomplete` is explicitly used for exploration.
-Successful samples show observed conformance, not guaranteed enforcement.
-
-Result directories contain synthetic schemas and arguments, not authentication
-headers or reasoning text. Treat new cases as public synthetic fixtures. The
-manifest records planned cases and source hashes; retain it with the raw results.
-
-The [live schema matrix](testdata/schema-matrix/README.md) records the latest
-verification date, tested routes, observed support and remaining limits. Update
-that single report when rerunning the matrix. Keep raw runs and their manifests
-as evidence; do not add dated narrative reports. Backend argument validation
-remains required.
+See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes,
+results, provider-specific limits and instructions for running the tests.
