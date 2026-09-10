@@ -209,13 +209,13 @@ Existing adapter releases remain available during migration.
 
 Apache License 2.0. See [LICENSE](LICENSE). Existing copyright notices and applicable [third-party attribution](THIRD_PARTY_NOTICES.md) are preserved.
 
-## Tool schema compatibility (trial)
+## Tool schema compatibility
 
 Every adapter checks function schemas before sending a request. Define inputs
 with either `FunctionDeclaration.Parameters` (`genai.Schema`) or
 `ParametersJsonSchema` (a JSON-serialisable schema object), never both. Tool
 schemas must have an object root. The raw form uses JSON Schema 2020-12 (other explicitly declared drafts are
-rejected during this trial rather than silently reinterpreted);
+rejected rather than silently reinterpreted);
 OpenAPI `nullable` belongs in the typed form, where the adapter converts it to
 an `anyOf` null alternative. Property names and example/default/enum data are
 not treated as schema keywords.
@@ -249,7 +249,7 @@ walks direct properties and array items, not alternatives or references. This do
 guarantee the model will omit every unrequested value; validate returned arguments.
 Compatibility checking is distinct from provider strict decoding.
 
-The current trial profiles are intentionally conservative:
+Compatibility profiles are conservative:
 
 | Route | Behaviour |
 |---|---|
@@ -263,7 +263,7 @@ assertions are removed only with opt-in; unsupported `oneOf` can become `anyOf`
 on OpenAI with an explicit exclusivity-loss warning. Claude and Google fallback
 remove `oneOf` because the converted alternative shape can be rejected. Local static references are checked,
 but reference conversion outside OpenAI and dynamic references remain errors
-in this trial rather than being silently erased. This is not a complete
+rather than being silently erased. This is not a complete
 cross-provider JSON Schema implementation or a guarantee of business correctness.
 Provider model availability, schema complexity limits and model-specific
 restrictions still apply. Validate actual arguments before execution.
