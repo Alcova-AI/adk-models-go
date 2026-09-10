@@ -331,6 +331,8 @@ Result directories contain synthetic schemas and arguments, not authentication
 headers or reasoning text. Treat new cases as public synthetic fixtures. The
 manifest records planned cases and source hashes; retain it with the raw results.
 
-The [initial 10 September 2026 trial](testdata/schema-matrix/2026-09-10.md)
-records the original failures. The [adapter fix verification](testdata/schema-matrix/2026-09-10-fixes.md) records subsequent corrections and remaining limits. The current catalogue remains provisional; do not treat
-this trial as approval to remove backend validation or deploy the adapter broadly.
+The [live schema matrix](testdata/schema-matrix/README.md) records the latest
+verification date, tested routes, observed support and remaining limits. Update
+that single report when rerunning the matrix. Keep raw runs and their manifests
+as evidence; do not add dated narrative reports. Backend argument validation
+remains required.
