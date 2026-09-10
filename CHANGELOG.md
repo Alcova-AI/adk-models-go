@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.1.1] - Tool schema compatibility
 
 ### Added
 
