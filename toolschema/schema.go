@@ -98,6 +98,9 @@ func (p *Processor) Prepare(ctx context.Context, tools []*genai.Tool) (map[strin
 			}
 			if p.target.Provider == "openai" || p.target.Provider == "anthropic" {
 				strict := strictCompatible(schema, p.target.Provider)
+				if p.target.Provider == "anthropic" && !strings.HasPrefix(p.target.Route, "vercel") && containsNullableEnum(schema) {
+					strict = false
+				}
 				if !strict {
 					if err := p.loss(ctx, fd.Name, "#", "strict", "schema requires best-effort calling because strict-mode shape requirements cannot be preserved"); err != nil {
 						return nil, err

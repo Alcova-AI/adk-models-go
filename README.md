@@ -254,14 +254,14 @@ The current trial profiles are intentionally conservative:
 | Route | Behaviour |
 |---|---|
 | OpenAI Responses, direct or Vercel | Standard JSON Schema subset; unsupported composition rules require opt-in. Optional fields retain their original meaning. |
-| Claude, direct or Vercel | Unsupported numeric bounds, length rules and unrestricted regex patterns require opt-in. Root alternatives require opt-in removal because Claude rejects that shape. |
+| Claude, direct or Vercel | Unsupported numeric bounds, length rules and unrestricted regex patterns require opt-in. Root alternatives require opt-in removal because Claude rejects that shape. Direct/Vertex nullable enums require explicit best-effort permission; Gateway nullable enums keep their checked strict-mode policy. |
 | Gemini, direct or Vertex | `toolschema.WrapGemini` checks the input while the Google SDK retains ownership of its native typed format. |
 | Gemini through Vercel | Checks known additional losses in the public Google converter, including numeric bounds, pattern and maximum string length. Root alternatives require opt-in removal. |
 
 Presentation-only property ordering may be dropped with a warning. Unsupported
 assertions are removed only with opt-in; unsupported `oneOf` can become `anyOf`
-on OpenAI and Claude with an explicit exclusivity-loss warning. Google fallback
-removes `oneOf` because the converted alternative shape can be rejected. Local static references are checked,
+on OpenAI with an explicit exclusivity-loss warning. Claude and Google fallback
+remove `oneOf` because the converted alternative shape can be rejected. Local static references are checked,
 but reference conversion outside OpenAI and dynamic references remain errors
 in this trial rather than being silently erased. This is not a complete
 cross-provider JSON Schema implementation or a guarantee of business correctness.

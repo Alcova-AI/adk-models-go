@@ -48,7 +48,7 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 			if err := p.loss(ctx, tool, path+"/"+escape(key), key, "constraint cannot be preserved by this route"); err != nil {
 				return err
 			}
-			if key == "oneOf" && p.target.Provider != "google" && !(path == "#" && p.target.Provider == "anthropic") {
+			if key == "oneOf" && p.target.Provider == "openai" {
 				// anyOf retains the possible shapes while relaxing exclusivity. Preserve
 				// an existing anyOf by combining both requirements under allOf only on
 				// routes that support it; otherwise removing oneOf is the safe widening.
@@ -129,8 +129,10 @@ func strictCompatible(schema map[string]any, provider string) bool {
 	return compatible
 }
 
-// A finite nullable enum has an equivalent union form. Claude can generate an
-// empty string for the anyOf form, even when the requested value is null.
+// A finite nullable enum has an equivalent union form. Claude can generate
+// an empty string for anyOf when the requested value is null.
+// Direct Claude rejects this union form in strict mode, so it needs explicit
+// best-effort permission before the schema is sent.
 func flattenNullableEnum(obj map[string]any) {
 	branches, ok := obj["anyOf"].([]any)
 	if !ok || len(branches) != 2 {
@@ -158,4 +160,18 @@ func flattenNullableEnum(obj map[string]any) {
 		delete(obj, "anyOf")
 		return
 	}
+}
+
+func containsNullableEnum(schema map[string]any) bool {
+	found := false
+	var visit func(map[string]any, string) error
+	visit = func(obj map[string]any, path string) error {
+		types, _ := obj["type"].([]any)
+		if _, exists := obj["enum"]; exists && slices.Contains(types, any("null")) {
+			found = true
+		}
+		return children(obj, path, visit)
+	}
+	_ = visit(schema, "#")
+	return found
 }

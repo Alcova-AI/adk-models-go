@@ -217,14 +217,14 @@ func TestGoogleOneOfFallbackDoesNotIntroduceRejectedAnyOf(t *testing.T) {
 	}
 }
 
-func TestNullableEnumEquivalentClaudeShape(t *testing.T) {
+func TestNullableEnumEquivalentClaudeGatewayShape(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object","properties":{"x":{"description":"Pick a colour","anyOf":[{"type":"string","enum":["red"]},{"type":"null"}]}},"required":["x"],"additionalProperties":false}`)
 	fd := &genai.FunctionDeclaration{Name: "test", ParametersJsonSchema: raw}
 	original, err := canonical(fd)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := New(Config{}, Target{"anthropic", "vertex"}).Prepare(t.Context(), tools(fd))
+	got, err := New(Config{}, Target{"anthropic", "vercel-anthropic"}).Prepare(t.Context(), tools(fd))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +246,41 @@ func TestNullableEnumEquivalentClaudeShape(t *testing.T) {
 			if err := compiled.Validate(map[string]any{"x": value}); (err == nil) != valid {
 				t.Fatalf("value %v validity mismatch: %v", value, err)
 			}
+		}
+	}
+}
+
+func TestDirectClaudeNullableEnumRequiresBestEffort(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{"x":{"anyOf":[{"type":"string","enum":["red"]},{"type":"null"}]}},"required":["x"],"additionalProperties":false}`)
+	for _, route := range []string{"direct", "vertex"} {
+		fd := &genai.FunctionDeclaration{Name: "test", ParametersJsonSchema: raw}
+		if _, err := New(Config{}, Target{"anthropic", route}).Prepare(t.Context(), tools(fd)); err == nil {
+			t.Fatal("accepted nullable enum without best-effort permission")
+		}
+		got, err := New(Config{AllowUnsupported: true, Warn: quiet}, Target{"anthropic", route}).Prepare(t.Context(), tools(fd))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got["test"].Strict == nil || *got["test"].Strict {
+			t.Fatal("direct Claude nullable enum must not use strict mode")
+		}
+		field := got["test"].Schema["properties"].(map[string]any)["x"].(map[string]any)
+		if field["anyOf"] != nil || field["enum"] == nil {
+			t.Fatalf("missing equivalent enum: %v", field)
+		}
+	}
+}
+
+func TestClaudeOneOfFallbackRetainsBaseType(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{"x":{"type":"integer","oneOf":[{"minimum":3},{"maximum":5}]}},"required":["x"],"additionalProperties":false}`)
+	for _, route := range []string{"direct", "vertex", "vercel-native", "vercel-anthropic"} {
+		got, err := New(Config{AllowUnsupported: true, Warn: quiet}, Target{"anthropic", route}).Prepare(t.Context(), tools(&genai.FunctionDeclaration{Name: "test", ParametersJsonSchema: raw}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		field := got["test"].Schema["properties"].(map[string]any)["x"].(map[string]any)
+		if field["anyOf"] != nil || field["oneOf"] != nil || field["type"] != "integer" {
+			t.Fatalf("Claude received rejected alternative: %v", field)
 		}
 	}
 }
