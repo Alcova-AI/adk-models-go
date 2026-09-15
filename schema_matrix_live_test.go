@@ -130,11 +130,11 @@ func matrixModel(ctx context.Context, r matrixRoute, cfg toolschema.Config, tr *
 	if strings.HasPrefix(r.Path, "vercel") {
 		mc.Vercel = &adkmodels.VercelConfig{}
 	}
-	return matrixConfiguredModel(ctx, r, cfg, tr, mc)
+	return matrixConfiguredModel(ctx, r, cfg, tr, mc, 50*time.Second)
 }
 
-func matrixConfiguredModel(ctx context.Context, r matrixRoute, cfg toolschema.Config, tr *matrixTransport, mc adkmodels.ModelConfig) (model.LLM, error) {
-	client := &http.Client{Transport: tr, Timeout: 50 * time.Second}
+func matrixConfiguredModel(ctx context.Context, r matrixRoute, cfg toolschema.Config, tr *matrixTransport, mc adkmodels.ModelConfig, timeout time.Duration) (model.LLM, error) {
+	client := &http.Client{Transport: tr, Timeout: timeout}
 	switch r.Path {
 	case "vercel-native":
 		return adkvercel.NewModel(adkvercel.Config{APIKey: os.Getenv("AI_GATEWAY_API_KEY"), HTTPClient: client, Model: mc})
@@ -455,7 +455,7 @@ func TestSchemaMatrixGeminiRegressionLive(t *testing.T) {
 					tr := &matrixTransport{base: http.DefaultTransport}
 					cfg := toolschema.Config{AllowUnsupported: true, Warn: func(context.Context, toolschema.Warning) {}}
 					mc := adkmodels.ModelConfig{CanonicalModel: modelName, RequestModel: r.Request, DefaultMaxOutputTokens: 4096, ToolSchemas: cfg, Reasoning: adkmodels.ReasoningConfig{DefaultLevel: genai.ThinkingLevelHigh}, Vercel: &adkmodels.VercelConfig{Only: []string{"vertex"}, ZeroDataRetention: true}}
-					llm, err := matrixConfiguredModel(ctx, r, cfg, tr, mc)
+					llm, err := matrixConfiguredModel(ctx, r, cfg, tr, mc, 85*time.Second)
 					if err != nil {
 						t.Fatal(err)
 					}
