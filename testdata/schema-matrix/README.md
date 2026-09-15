@@ -20,10 +20,21 @@ The private downstream request was not inspected. Native Vertex accepted the
 original `parametersJsonSchema`. This is route acceptance evidence, not a full
 application or document-quality evaluation.
 
-Run `TestGemini38RoutesLive` with `GEMINI38_LIVE=1`, `GEMINI38_ROUTE` set to
-`vertex`, `vercel-anthropic`, `vercel-openai`, or `vercel-native`, and a fresh
-`GEMINI38_OUTPUT` directory. It records wire schemas and results and requires
-the requested tool and exact arguments. Use the credentials described below.
+The regression uses the shared matrix fixtures, route setup and capture helpers.
+Run only the acceptance regression (ordinary tests skip paid calls):
+
+```sh
+ADK_SCHEMA_LIVE=1 ADK_SCHEMA_GEMINI_MODEL=gemini-3.8-flash \
+  ADK_SCHEMA_OUTPUT="$PWD/dist/schema-matrix/gemini-regression" \
+  go test . -run '^TestSchemaMatrixGeminiRegressionLive$' -count=1 -timeout 10m
+```
+
+The model defaults to `gemini-3.8-flash`. All four Gemini routes run with both
+streaming modes. To narrow the run, set `ADK_SCHEMA_ROUTES` to comma-separated
+`gemini-vertex`, `gemini-messages`, `gemini-responses`, or `gemini-native`.
+Use a fresh output directory and the credentials described below. Unlike the
+observational matrix, this regression fails unless each request returns the
+requested tool and exact arguments. No tools execute.
 
 ## General schema matrix
 

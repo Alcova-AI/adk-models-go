@@ -5,10 +5,13 @@ package adkmodels_test
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/tool/functiontool"
 	"google.golang.org/genai"
 )
 
@@ -208,4 +211,37 @@ func repeatedObjectCases() []schemaCase {
 		)
 	}
 	return cases
+}
+
+// Synthetic input types mirror the two rejected application tool shapes.
+type routeTodoInput struct {
+	Todos []routeTodo `json:"todos" jsonschema:"list of todo items to create or update"`
+}
+type routeTodo struct {
+	ID      int    `json:"id,omitempty" jsonschema:"unique identifier for existing todo - omit for new items"`
+	Content string `json:"content" jsonschema:"the content or description of the todo item"`
+	Status  string `json:"status" jsonschema:"status: todo, in_progress, completed, or deleted"`
+}
+type routeStageInput struct {
+	Files []routeStageFile `json:"files" jsonschema:"required,Files to copy into Agent Sandbox."`
+}
+type routeStageFile struct {
+	Source        string              `json:"source,omitempty" jsonschema:"Exact versioned Filestore URI or an authorised Filestore path. Mutually exclusive with skill_resource."`
+	SkillResource *routeSkillResource `json:"skill_resource,omitempty" jsonschema:"Caller-visible skill resource. Mutually exclusive with source."`
+	Destination   string              `json:"destination" jsonschema:"required,Canonical Agent Sandbox-relative destination path, for example inputs/template.docx."`
+}
+type routeSkillResource struct {
+	SkillID string `json:"skill_id" jsonschema:"required,Opaque frontmatter.metadata.skill_id returned by load_skill."`
+	Path    string `json:"path" jsonschema:"required,Exact file path inside the skill."`
+}
+
+func routeDeclaration[T any](t *testing.T, name string) *genai.FunctionDeclaration {
+	t.Helper()
+	tool, err := functiontool.New(functiontool.Config{Name: name, Description: "Synthetic schema check; never executed."}, func(agent.Context, T) (map[string]any, error) { return nil, fmt.Errorf("must not execute") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tool.(interface {
+		Declaration() *genai.FunctionDeclaration
+	}).Declaration()
 }
