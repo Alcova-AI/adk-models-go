@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Prepare complete type alternatives for Gemini through Vercel so nullable arrays and objects do not produce rejected `anyOf` sibling fields. Preserve accepted values and native Vertex's existing schema representation.
+
 ## [v0.1.2] - Enterprise Web Search
 
 ### Added

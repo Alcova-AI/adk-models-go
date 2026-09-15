@@ -1,5 +1,32 @@
 # Live tool schema matrix
 
+## Gemini 3.8 Flash nullable tool regression
+
+Tested 15 September 2026 with high thinking, automatic tool choice and synthetic
+`todo_write` and `sandbox_stage_files` definitions inferred by ADK functiontool.
+Each tool ran with streaming off/on. No tools executed. Vercel routes were
+Vertex-only with zero data retention.
+
+| Route | v0.1.2 | Candidate union preparation |
+|---|---|---|
+| Native Vertex | 4/4 accepted, exact arguments | Unchanged |
+| Vercel Messages | 4/4 HTTP 400 | 4/4 accepted, exact arguments |
+| Vercel Responses | 4/4 HTTP 400 | 4/4 accepted, exact arguments |
+| Vercel native | 4/4 HTTP 400 | 4/4 accepted, exact arguments |
+
+The failing Gateway requests contained `type: ["null", "array"]` with items and
+descriptions; Google rejected fields alongside `anyOf` after downstream conversion.
+The private downstream request was not inspected. Native Vertex accepted the
+original `parametersJsonSchema`. This is route acceptance evidence, not a full
+application or document-quality evaluation.
+
+Run `TestGemini38RoutesLive` with `GEMINI38_LIVE=1`, `GEMINI38_ROUTE` set to
+`vertex`, `vercel-anthropic`, `vercel-openai`, or `vercel-native`, and a fresh
+`GEMINI38_OUTPUT` directory. It records wire schemas and results and requires
+the requested tool and exact arguments. Use the credentials described below.
+
+## General schema matrix
+
 Last tested: **10 September 2026**.
 
 The normal adapters were tested on ten routes with **41 non-streaming cases** and **14 streaming cases**, including four inline/reference pairs. Each case requests valid arguments and deliberately conflicting arguments. No tools execute. These are synthetic observations, not production success rates or guaranteed enforcement.
