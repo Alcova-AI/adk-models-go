@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.1.3] - OpenAI SDK compatibility
+
+### Fixed
+
+- Compile against `openai-go/v3 v3.54.0`, where function-call output `call_id` is optional (`param.Opt[string]`).
+
 ## [v0.1.2] - Enterprise Web Search
 
 ### Added
