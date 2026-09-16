@@ -27,3 +27,50 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.0
+          args: --no-config --enable-only=staticcheck,ineffassign,unused --timeout=5m
+
+  formatting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          mapfile -d '' files < <(git ls-files -z '*.go')
+          unformatted=$(gofmt -l "${files[@]}")
+          if [[ -n "$unformatted" ]]; then
+            printf 'Run gofmt on these files:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test with race detector
+        env:
+          CGO_ENABLED: '1'
+        run: go test -race -timeout 10m ./...

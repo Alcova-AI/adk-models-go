@@ -125,7 +125,7 @@ func canonical(fd *genai.FunctionDeclaration) (map[string]any, error) {
 	if fd.Parameters != nil && fd.ParametersJsonSchema != nil {
 		return nil, fmt.Errorf("supply Parameters or ParametersJsonSchema, not both")
 	}
-	var source any = fd.ParametersJsonSchema
+	source := fd.ParametersJsonSchema
 	typed := fd.Parameters != nil
 	if typed {
 		source = fd.Parameters
