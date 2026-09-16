@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -625,6 +626,13 @@ func TestGenerateStream_IncompleteToolBlockStop(t *testing.T) {
 	if interrupted.ToolName != "save_file" || interrupted.ToolID != "toolu_cut" || interrupted.PartialInput != `{"path": "/reports/summ` {
 		t.Fatalf("truncated tool details lost: %+v", interrupted)
 	}
+	if interrupted.StopReason != anthropic.StopReasonMaxTokens {
+		t.Fatalf("stop reason = %q, want max_tokens", interrupted.StopReason)
+	}
+	message, err := accumulateEvents(t, payloads)
+	if err == nil || message.StopReason != anthropic.StopReasonMaxTokens || message.Usage.OutputTokens != 50 {
+		t.Fatalf("final metadata lost: stop=%q output=%d err=%v", message.StopReason, message.Usage.OutputTokens, err)
+	}
 	for _, part := range interrupted.Parts {
 		if part.FunctionCall != nil && part.FunctionCall.Name == "save_file" {
 			t.Fatal("incomplete tool call must not be returned as executable content")
@@ -632,6 +640,42 @@ func TestGenerateStream_IncompleteToolBlockStop(t *testing.T) {
 	}
 	if requests.Load() != 1 || len(*sleeps) != 0 {
 		t.Fatal("incomplete tool output must not be retried")
+	}
+}
+
+func TestGenerateStream_IncompleteToolBlockConnectionEnds(t *testing.T) {
+	for _, overload := range []bool{false, true} {
+		t.Run(fmt.Sprintf("overload-%t", overload), func(t *testing.T) {
+			// No text delta: a transport error must still not trigger a retry.
+			payloads := []string{
+				interruptedToolCallStream[0],
+				`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"cut","name":"save_file","input":{}}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}`,
+				`{"type":"content_block_stop","index":0}`,
+			}
+			if overload {
+				payloads = append(payloads, `{"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`)
+			}
+			srv, requests := newSSEServer(t, sseFromPayloads(t, payloads))
+			m, sleeps := newStreamTestModel(t, srv.URL)
+			pairs := collectIncludingThoughts(t.Context(), m)
+			if len(pairs) != 1 {
+				t.Fatalf("got %d pairs, want one interruption", len(pairs))
+			}
+			var interrupted *OutputInterruptedError
+			if !errors.As(pairs[0].err, &interrupted) || interrupted.PartialInput != `{"path":` || interrupted.ToolID != "cut" {
+				t.Fatalf("interruption details lost: %v", pairs[0].err)
+			}
+			if overload {
+				var apiErr *anthropic.Error
+				if !errors.As(interrupted, &apiErr) {
+					t.Fatalf("underlying error lost: %v", interrupted)
+				}
+			}
+			if requests.Load() != 1 || len(*sleeps) != 0 {
+				t.Fatal("incomplete tool must not retry")
+			}
+		})
 	}
 }
 

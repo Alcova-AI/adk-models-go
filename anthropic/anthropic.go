@@ -319,24 +319,19 @@ func (m *anthropicModel) streamOnce(
 		}
 	}
 
+	// A connection can end before final metadata arrives. Incomplete tool
+	// input must remain an interruption, never an executable call or retry.
+	if converters.HasIncompleteToolInput(&message) {
+		yield(nil, newOutputInterruptedError(&message, stream.Err(), includeThoughts))
+		return nil
+	}
+
 	if err := stream.Err(); err != nil {
 		if !yielded {
 			// Pre-content failure: generateStream decides whether to retry.
 			return err
 		}
 		yield(nil, fmt.Errorf("stream error: %w", err))
-		return nil
-	}
-
-	// Belt-and-braces: the stream can complete without Accumulate erroring
-	// yet still carry a tool call truncated at the ceiling (invalid input
-	// JSON). Converting that normally would fail or emit a broken tool
-	// call, so report the interruption instead. A max_tokens stop with an
-	// otherwise-valid message (e.g. truncated mid-thinking) is NOT an
-	// interruption for our purposes — it converts normally below and the
-	// harness reacts off the mapped max_tokens FinishReason.
-	if message.StopReason == anthropic.StopReasonMaxTokens && converters.HasIncompleteToolInput(&message) {
-		yield(nil, newOutputInterruptedError(&message, nil, includeThoughts))
 		return nil
 	}
 
@@ -367,7 +362,9 @@ func accumulateMessage(message *anthropic.Message, event anthropic.MessageStream
 	if event.Type == "content_block_stop" && event.Index >= 0 && event.Index < int64(len(message.Content)) {
 		block := message.Content[event.Index]
 		if block.Type == "tool_use" && !json.Valid(block.Input) {
-			return fmt.Errorf("tool block ended with incomplete input")
+			// Do not let the SDK replace incomplete input with {}. Keep reading
+			// so message_delta can supply the stop reason and final usage.
+			return nil
 		}
 	}
 	previous := message.Usage
