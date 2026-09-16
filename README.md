@@ -273,3 +273,8 @@ JSON Schema representation.
 
 See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes,
 results, provider-specific limits and instructions for running the tests.
+
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for development checks, live-test guidance, and contribution terms.
