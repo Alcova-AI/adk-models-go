@@ -608,6 +608,33 @@ func TestGenerateStream_InterruptedOutputIsNotRetried(t *testing.T) {
 	}
 }
 
+func TestGenerateStream_IncompleteToolBlockStop(t *testing.T) {
+	payloads := append([]string(nil), interruptedToolCallStream[:len(interruptedToolCallStream)-2]...)
+	payloads = append(payloads, `{"type":"content_block_stop","index":3}`)
+	payloads = append(payloads, interruptedToolCallStream[len(interruptedToolCallStream)-2:]...)
+	srv, requests := newSSEServer(t, sseFromPayloads(t, payloads))
+	m, sleeps := newStreamTestModel(t, srv.URL)
+	pairs := collectIncludingThoughts(t.Context(), m)
+	if len(pairs) != 3 {
+		t.Fatalf("got %d responses, want two partials and an interruption", len(pairs))
+	}
+	var interrupted *OutputInterruptedError
+	if !errors.As(pairs[2].err, &interrupted) {
+		t.Fatalf("got %v, want an interruption", pairs[2].err)
+	}
+	if interrupted.ToolName != "save_file" || interrupted.ToolID != "toolu_cut" || interrupted.PartialInput != `{"path": "/reports/summ` {
+		t.Fatalf("truncated tool details lost: %+v", interrupted)
+	}
+	for _, part := range interrupted.Parts {
+		if part.FunctionCall != nil && part.FunctionCall.Name == "save_file" {
+			t.Fatal("incomplete tool call must not be returned as executable content")
+		}
+	}
+	if requests.Load() != 1 || len(*sleeps) != 0 {
+		t.Fatal("incomplete tool output must not be retried")
+	}
+}
+
 func TestSleepWithContext(t *testing.T) {
 	t.Run("cancel_aborts_promptly", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())

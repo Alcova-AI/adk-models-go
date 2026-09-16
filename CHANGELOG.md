@@ -1,10 +1,19 @@
 # Changelog
 
-## Unreleased
+## [v0.1.3] - Provider compatibility
 
 ### Fixed
 
 - Prepare complete type alternatives for Gemini through Vercel so nullable arrays and objects do not produce rejected `anyOf` sibling fields. Preserve accepted values and native Vertex's existing schema representation.
+
+- Support optional function-call output IDs in newer OpenAI SDKs, including the compatibility fix from #6.
+
+- Preserve incomplete streamed Anthropic tool input and cumulative token usage with the updated SDK. Read streamed OpenAI tool names from their output items.
+
+### Changed
+
+- Upgrade ADK to v2.4.0, Anthropic to v1.73.0, OpenAI to v3.61.0 and Google GenAI to v1.71.0.
+- Upgrade JSON Schema support to v0.4.3 and OAuth2 to v0.37.0.
 
 ## [v0.1.2] - Enterprise Web Search
 
