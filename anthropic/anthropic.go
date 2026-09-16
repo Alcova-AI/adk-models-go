@@ -16,6 +16,7 @@ package adkanthropic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -287,17 +288,10 @@ func (m *anthropicModel) streamOnce(
 			hasGatewayMetadata = true
 		}
 
-		// Accumulate the message. A failure here is almost always the
-		// SDK's message_stop re-marshal choking on a tool call whose input
-		// JSON was truncated at the max_tokens ceiling. Surface that as a
-		// typed OutputInterruptedError carrying whatever survived; any other
-		// accumulation failure keeps its original error so it isn't
-		// misdiagnosed as an interruption.
-		if err := message.Accumulate(event); err != nil {
+		if err := accumulateMessage(&message, event); err != nil {
 			yield(nil, classifyAccumulateError(&message, err, includeThoughts))
 			return nil
 		}
-		mergeMessageDeltaUsage(&message, event)
 
 		// Handle different event types for streaming
 		switch ev := event.AsAny().(type) {
@@ -325,24 +319,19 @@ func (m *anthropicModel) streamOnce(
 		}
 	}
 
+	// A connection can end before final metadata arrives. Incomplete tool
+	// input must remain an interruption, never an executable call or retry.
+	if converters.HasIncompleteToolInput(&message) {
+		yield(nil, newOutputInterruptedError(&message, stream.Err(), includeThoughts))
+		return nil
+	}
+
 	if err := stream.Err(); err != nil {
 		if !yielded {
 			// Pre-content failure: generateStream decides whether to retry.
 			return err
 		}
 		yield(nil, fmt.Errorf("stream error: %w", err))
-		return nil
-	}
-
-	// Belt-and-braces: the stream can complete without Accumulate erroring
-	// yet still carry a tool call truncated at the ceiling (invalid input
-	// JSON). Converting that normally would fail or emit a broken tool
-	// call, so report the interruption instead. A max_tokens stop with an
-	// otherwise-valid message (e.g. truncated mid-thinking) is NOT an
-	// interruption for our purposes — it converts normally below and the
-	// harness reacts off the mapped max_tokens FinishReason.
-	if message.StopReason == anthropic.StopReasonMaxTokens && converters.HasIncompleteToolInput(&message) {
-		yield(nil, newOutputInterruptedError(&message, nil, includeThoughts))
 		return nil
 	}
 
@@ -364,32 +353,31 @@ func (m *anthropicModel) streamOnce(
 	return nil
 }
 
-// mergeMessageDeltaUsage preserves cumulative usage fields that compatible
-// gateways can report on message_delta. The Anthropic SDK accumulator only
-// copies output_tokens from that event because Anthropic normally reports the
-// input fields on message_start. Gateways such as Vercel can report their final
-// input count on message_delta instead. Taking the maximum keeps Anthropic and
-// Vertex behaviour unchanged while accepting later cumulative totals.
-func mergeMessageDeltaUsage(message *anthropic.Message, event anthropic.MessageStreamEventUnion) {
-	if message == nil {
-		return
+// accumulateMessage preserves incomplete tool input before the SDK replaces it
+// with {}, and retains the largest cumulative token counts across gateway events.
+func accumulateMessage(message *anthropic.Message, event anthropic.MessageStreamEventUnion) error {
+	if event.Type == "message_stop" && converters.HasIncompleteToolInput(message) {
+		return fmt.Errorf("message ended with incomplete tool input")
 	}
-	delta, ok := event.AsAny().(anthropic.MessageDeltaEvent)
-	if !ok {
-		return
+	if event.Type == "content_block_stop" && event.Index >= 0 && event.Index < int64(len(message.Content)) {
+		block := message.Content[event.Index]
+		if block.Type == "tool_use" && !json.Valid(block.Input) {
+			// Do not let the SDK replace incomplete input with {}. Keep reading
+			// so message_delta can supply the stop reason and final usage.
+			return nil
+		}
 	}
-	if delta.Usage.JSON.InputTokens.Valid() {
-		message.Usage.InputTokens = max(message.Usage.InputTokens, delta.Usage.InputTokens)
+	previous := message.Usage
+	if err := message.Accumulate(event); err != nil {
+		return err
 	}
-	if delta.Usage.JSON.CacheReadInputTokens.Valid() {
-		message.Usage.CacheReadInputTokens = max(message.Usage.CacheReadInputTokens, delta.Usage.CacheReadInputTokens)
+	if event.Type == "message_delta" {
+		message.Usage.InputTokens = max(previous.InputTokens, message.Usage.InputTokens)
+		message.Usage.CacheReadInputTokens = max(previous.CacheReadInputTokens, message.Usage.CacheReadInputTokens)
+		message.Usage.CacheCreationInputTokens = max(previous.CacheCreationInputTokens, message.Usage.CacheCreationInputTokens)
+		message.Usage.OutputTokens = max(previous.OutputTokens, message.Usage.OutputTokens)
 	}
-	if delta.Usage.JSON.CacheCreationInputTokens.Valid() {
-		message.Usage.CacheCreationInputTokens = max(message.Usage.CacheCreationInputTokens, delta.Usage.CacheCreationInputTokens)
-	}
-	if delta.Usage.JSON.OutputTokens.Valid() {
-		message.Usage.OutputTokens = max(message.Usage.OutputTokens, delta.Usage.OutputTokens)
-	}
+	return nil
 }
 
 // isOverloadedStreamError reports whether err is Anthropic's overloaded_error

@@ -127,10 +127,14 @@ func matrixModel(ctx context.Context, r matrixRoute, cfg toolschema.Config, tr *
 	if r.Provider == "anthropic" {
 		mc.Reasoning.DefaultLevel = ""
 	}
-	client := &http.Client{Transport: tr, Timeout: 50 * time.Second}
 	if strings.HasPrefix(r.Path, "vercel") {
 		mc.Vercel = &adkmodels.VercelConfig{}
 	}
+	return matrixConfiguredModel(ctx, r, cfg, tr, mc, 50*time.Second)
+}
+
+func matrixConfiguredModel(ctx context.Context, r matrixRoute, cfg toolschema.Config, tr *matrixTransport, mc adkmodels.ModelConfig, timeout time.Duration) (model.LLM, error) {
+	client := &http.Client{Transport: tr, Timeout: timeout}
 	switch r.Path {
 	case "vercel-native":
 		return adkvercel.NewModel(adkvercel.Config{APIKey: os.Getenv("AI_GATEWAY_API_KEY"), HTTPClient: client, Model: mc})
@@ -399,4 +403,95 @@ func matrixCalls(result *matrixResult, resp *model.LLMResponse) []*genai.Functio
 		calls = append(calls, part.FunctionCall)
 	}
 	return calls
+}
+
+// This records provider acceptance, not a document-quality score. It never runs tools.
+func TestSchemaMatrixGeminiRegressionLive(t *testing.T) {
+	if os.Getenv("ADK_SCHEMA_LIVE") != "1" {
+		t.Skip("set ADK_SCHEMA_LIVE=1 for paid synthetic route checks")
+	}
+	dir := os.Getenv("ADK_SCHEMA_OUTPUT")
+	modelName := os.Getenv("ADK_SCHEMA_GEMINI_MODEL")
+	if modelName == "" {
+		modelName = "gemini-3.8-flash"
+	}
+	routes := []string{"gemini-vertex", "gemini-messages", "gemini-responses", "gemini-native"}
+	if err := matrixFilterValid(os.Getenv("ADK_SCHEMA_ROUTES"), routes); err != nil {
+		t.Fatal(err)
+	}
+	if dir == "" {
+		t.Fatal("ADK_SCHEMA_OUTPUT required")
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatal("output directory must be empty", err)
+	}
+	cases := []struct {
+		fd   *genai.FunctionDeclaration
+		args string
+	}{
+		{routeDeclaration[routeTodoInput](t, "todo_write"), `{"todos":[{"content":"Check synthetic document","status":"todo"}]}`},
+		{routeDeclaration[routeStageInput](t, "sandbox_stage_files"), `{"files":[{"source":"inputs/example.txt","destination":"inputs/example.txt"}]}`},
+	}
+	for _, r := range matrixRoutes() {
+		if r.Provider != "google" {
+			continue
+		}
+		if filter := os.Getenv("ADK_SCHEMA_ROUTES"); filter != "" && !strings.Contains(","+filter+",", ","+r.Name+",") {
+			continue
+		}
+		r.Model, r.Request = modelName, modelName
+		if strings.HasPrefix(r.Path, "vercel") {
+			r.Request = "google/" + modelName
+		}
+		route := r.Name
+		for _, tc := range cases {
+			for _, stream := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/stream-%v", route, tc.fd.Name, stream), func(t *testing.T) {
+					ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+					defer cancel()
+					tr := &matrixTransport{base: http.DefaultTransport}
+					cfg := toolschema.Config{AllowUnsupported: true, Warn: func(context.Context, toolschema.Warning) {}}
+					mc := adkmodels.ModelConfig{CanonicalModel: modelName, RequestModel: r.Request, DefaultMaxOutputTokens: 4096, ToolSchemas: cfg, Reasoning: adkmodels.ReasoningConfig{DefaultLevel: genai.ThinkingLevelHigh}, Vercel: &adkmodels.VercelConfig{Only: []string{"vertex"}, ZeroDataRetention: true}}
+					llm, err := matrixConfiguredModel(ctx, r, cfg, tr, mc, 85*time.Second)
+					if err != nil {
+						t.Fatal(err)
+					}
+					req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("Call "+tc.fd.Name+" once with exactly these synthetic arguments: "+tc.args, genai.RoleUser)}, Config: &genai.GenerateContentConfig{MaxOutputTokens: 4096, ThinkingConfig: &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelHigh}, Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{tc.fd}}}}}
+					result := matrixResult{Route: route, Model: modelName, Case: tc.fd.Name, Stream: stream, Started: time.Now().UTC().Format(time.RFC3339)}
+					for resp, e := range llm.GenerateContent(ctx, req, stream) {
+						if e != nil {
+							result.CallError = e.Error()
+							break
+						}
+						for _, call := range matrixCalls(&result, resp) {
+							result.Arguments = append(result.Arguments, call.Args)
+						}
+					}
+					result.Statuses = tr.statuses
+					result.WireSchemas = tr.schemas
+					var wanted map[string]any
+					if err := json.Unmarshal([]byte(tc.args), &wanted); err != nil {
+						t.Fatal(err)
+					}
+					for _, args := range result.Arguments {
+						result.RequestedMatch = append(result.RequestedMatch, reflect.DeepEqual(args, wanted))
+					}
+					raw, err := json.MarshalIndent(result, "", "  ")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%s-%s-%v.json", route, tc.fd.Name, stream)), raw, 0600); err != nil {
+						t.Fatal(err)
+					}
+					t.Logf("route=%s http=%v calls=%d error=%s", route, result.Statuses, len(result.Arguments), result.CallError)
+					if result.CallError != "" || len(result.ResponseErrors) != 0 || len(result.Arguments) != 1 || !result.RequestedMatch[0] || len(result.ToolNames) != 1 || result.ToolNames[0] != tc.fd.Name {
+						t.Error("route did not return the requested tool and exact arguments; see captured result")
+					}
+				})
+			}
+		}
+	}
 }

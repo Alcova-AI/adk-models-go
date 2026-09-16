@@ -23,13 +23,9 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-// accumulateEvents drives anthropic.Message.Accumulate over a sequence of
-// fabricated stream-event payloads, returning the accumulated message and the
-// first Accumulate error (if any). This reproduces the exact state the
-// streaming loop holds when generation is cut off at the max_tokens ceiling
-// mid-tool-call: the trailing tool_use block never receives a
-// content_block_stop, so message_stop's re-marshal of the invalid input JSON
-// fails.
+// accumulateEvents uses the same guarded accumulator as the streaming loop.
+// It preserves truncated tool input before the SDK sanitises it at block or
+// message completion.
 func accumulateEvents(t *testing.T, payloads []string) (*anthropic.Message, error) {
 	t.Helper()
 	msg := &anthropic.Message{}
@@ -38,7 +34,7 @@ func accumulateEvents(t *testing.T, payloads []string) (*anthropic.Message, erro
 		if err := json.Unmarshal([]byte(p), &ev); err != nil {
 			t.Fatalf("event %d unmarshal: %v", i, err)
 		}
-		if err := msg.Accumulate(ev); err != nil {
+		if err := accumulateMessage(msg, ev); err != nil {
 			return msg, err
 		}
 	}
@@ -73,7 +69,7 @@ var interruptedToolCallStream = []string{
 func TestNewOutputInterruptedError_FromAccumulateFailure(t *testing.T) {
 	msg, accErr := accumulateEvents(t, interruptedToolCallStream)
 	if accErr == nil {
-		t.Fatal("expected Accumulate to fail on the truncated tool input, got nil")
+		t.Fatal("expected guarded accumulation to fail on the truncated tool input, got nil")
 	}
 
 	err := newOutputInterruptedError(msg, accErr, true)
@@ -129,7 +125,7 @@ func TestNewOutputInterruptedError_HidesUnsignedThoughts(t *testing.T) {
 
 	msg, accErr := accumulateEvents(t, unsignedStream)
 	if accErr == nil {
-		t.Fatal("expected Accumulate to fail on the truncated tool input, got nil")
+		t.Fatal("expected guarded accumulation to fail on the truncated tool input, got nil")
 	}
 
 	err := newOutputInterruptedError(msg, accErr, false)
@@ -197,7 +193,7 @@ func TestClassifyAccumulateError(t *testing.T) {
 	t.Run("truncated_tool_call_is_interruption", func(t *testing.T) {
 		msg, accErr := accumulateEvents(t, interruptedToolCallStream)
 		if accErr == nil {
-			t.Fatal("expected Accumulate to fail on the truncated tool input, got nil")
+			t.Fatal("expected guarded accumulation to fail on the truncated tool input, got nil")
 		}
 
 		err := classifyAccumulateError(msg, accErr, true)

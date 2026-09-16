@@ -57,9 +57,75 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 			delete(obj, key)
 		}
 	}
-	return children(obj, path, func(child map[string]any, childPath string) error {
+	if err := children(obj, path, func(child map[string]any, childPath string) error {
 		return p.adapt(ctx, tool, child, childPath, depth+1)
-	})
+	}); err != nil {
+		return err
+	}
+	if p.target.Provider == "google" && strings.HasPrefix(p.target.Route, "vercel") {
+		return googleUnion(obj, path)
+	}
+	return nil
+}
+
+// Gateway's Google conversion can put items/properties beside anyOf when it
+// expands a type list. Send complete alternatives instead. Each alternative
+// retains every assertion, including enum, so null is not accidentally allowed.
+// Run after child adaptation: the shared child values are no longer mutated.
+func googleUnion(obj map[string]any, path string) error {
+	if types, ok := obj["type"].([]any); ok {
+		if _, composed := obj["anyOf"]; composed {
+			return fmt.Errorf("schema %s: Google Gateway cannot combine a type list with anyOf", path)
+		}
+		branches := make([]any, 0, len(types))
+		for _, typ := range types {
+			branch := make(map[string]any, len(obj))
+			for key, value := range obj {
+				branch[key] = value
+			}
+			branch["type"] = typ
+			branches = append(branches, branch)
+		}
+		clear(obj)
+		obj["anyOf"] = branches
+		return nil
+	}
+	branches, ok := obj["anyOf"].([]any)
+	if !ok || len(obj) == 1 {
+		return nil
+	}
+	// Annotations do not constrain values. Move them into each alternative;
+	// never discard assertion siblings just to satisfy Google's wire format.
+	for key := range obj {
+		if key != "anyOf" && !slices.Contains([]string{"description", "title", "default", "examples", "deprecated", "readOnly", "writeOnly"}, key) {
+			return fmt.Errorf("schema %s: Google Gateway cannot preserve anyOf sibling %q", path, key)
+		}
+	}
+	for _, value := range branches {
+		branch, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("schema %s: Google Gateway requires object alternatives", path)
+		}
+		for key, annotation := range obj {
+			if key == "anyOf" {
+				continue
+			}
+			if existing, exists := branch[key]; !exists {
+				branch[key] = annotation
+			} else if key == "description" && existing != annotation {
+				branch[key] = fmt.Sprint(annotation) + "\n\n" + fmt.Sprint(existing)
+			}
+		}
+		if err := googleUnion(branch, path+"/anyOf"); err != nil {
+			return err
+		}
+	}
+	for key := range obj {
+		if key != "anyOf" {
+			delete(obj, key)
+		}
+	}
+	return nil
 }
 
 func (p *Processor) supports(key string, value any) bool {

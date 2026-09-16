@@ -1,5 +1,43 @@
 # Live tool schema matrix
 
+## Gemini 3.8 Flash nullable tool regression
+
+Tested 15 September 2026 with high thinking, automatic tool choice and synthetic
+`todo_write` and `sandbox_stage_files` definitions inferred by ADK functiontool.
+Each tool ran with streaming off/on. No tools executed. Vercel routes were
+Vertex-only with zero data retention.
+
+| Route | v0.1.2 | Candidate union preparation |
+|---|---|---|
+| Native Vertex | 4/4 accepted, exact arguments | Unchanged |
+| Vercel Messages | 4/4 HTTP 400 | 4/4 accepted, exact arguments |
+| Vercel Responses | 4/4 HTTP 400 | 4/4 accepted, exact arguments |
+| Vercel native | 4/4 HTTP 400 | 4/4 accepted, exact arguments |
+
+The failing Gateway requests contained `type: ["null", "array"]` with items and
+descriptions; Google rejected fields alongside `anyOf` after downstream conversion.
+The private downstream request was not inspected. Native Vertex accepted the
+original `parametersJsonSchema`. This is route acceptance evidence, not a full
+application or document-quality evaluation.
+
+The regression uses the shared matrix fixtures, route setup and capture helpers.
+Run only the acceptance regression (ordinary tests skip paid calls):
+
+```sh
+ADK_SCHEMA_LIVE=1 ADK_SCHEMA_GEMINI_MODEL=gemini-3.8-flash \
+  ADK_SCHEMA_OUTPUT="$PWD/dist/schema-matrix/gemini-regression" \
+  go test . -run '^TestSchemaMatrixGeminiRegressionLive$' -count=1 -timeout 10m
+```
+
+The model defaults to `gemini-3.8-flash`. All four Gemini routes run with both
+streaming modes. To narrow the run, set `ADK_SCHEMA_ROUTES` to comma-separated
+`gemini-vertex`, `gemini-messages`, `gemini-responses`, or `gemini-native`.
+Use a fresh output directory and the credentials described below. Unlike the
+observational matrix, this regression fails unless each request returns the
+requested tool and exact arguments. No tools execute.
+
+## General schema matrix
+
 Last tested: **10 September 2026**.
 
 The normal adapters were tested on ten routes with **41 non-streaming cases** and **14 streaming cases**, including four inline/reference pairs. Each case requests valid arguments and deliberately conflicting arguments. No tools execute. These are synthetic observations, not production success rates or guaranteed enforcement.

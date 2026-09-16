@@ -397,7 +397,7 @@ func (t *callTracker) newFunctionResponse(fr *genai.FunctionResponse) (*response
 		output = responses.ResponseInputItemFunctionCallOutputOutputUnionParam{OfResponseFunctionCallOutputItemArray: parts}
 	}
 	return &responses.ResponseInputItemFunctionCallOutputParam{
-		CallID: callID, Output: output, Type: constant.FunctionCallOutput("function_call_output"),
+		CallID: param.NewOpt(callID), Output: output, Type: constant.FunctionCallOutput("function_call_output"),
 	}, nil
 }
 

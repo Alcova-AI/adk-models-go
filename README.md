@@ -263,5 +263,18 @@ All routes accept acyclic named local references (`#/$defs/name` or
 recursive references, anchors and nested reference scopes are rejected;
 provider schema complexity limits still apply.
 
+Gemini through Vercel receives complete alternatives for type lists such as
+`["array", "null"]`. Item rules and descriptions stay inside each alternative,
+avoiding Gateway conversion that places fields beside Google's `anyOf`.
+Descriptions on explicit alternatives are moved into their branches. Unsupported
+combinations of `anyOf` with otherwise-supported assertion siblings remain errors,
+even with fallback, rather than silently losing those assertions. Native Vertex keeps its existing
+JSON Schema representation.
+
 See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes,
 results, provider-specific limits and instructions for running the tests.
+
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for development checks, live-test guidance, and contribution terms.

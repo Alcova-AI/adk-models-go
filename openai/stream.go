@@ -149,10 +149,7 @@ func (t *streamTranslator) emitFunctionCall(done responses.ResponseFunctionCallA
 	}
 	delete(t.itemToCallID, done.ItemID)
 
-	name := done.Name
-	if name == "" {
-		name = t.itemToName[done.ItemID]
-	}
+	name := t.itemToName[done.ItemID]
 	delete(t.itemToName, done.ItemID)
 
 	if payload == "" {

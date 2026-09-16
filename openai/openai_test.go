@@ -457,3 +457,35 @@ func TestSummaryStyleRequiresIncludeThoughts(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamToolCallUsesAddedItemIdentity(t *testing.T) {
+	translator := newStreamTranslator()
+	events := []string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"item_1","type":"function_call","name":"lookup","call_id":"call_1","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"item_1","output_index":0,"delta":"{\"query\":\"hello\"}"}`,
+		`{"type":"response.function_call_arguments.done","item_id":"item_1","output_index":0,"arguments":"{\"query\":\"hello\"}"}`,
+	}
+	for i, raw := range events {
+		var event responses.ResponseStreamEventUnion
+		if err := json.Unmarshal([]byte(raw), &event); err != nil {
+			t.Fatal(err)
+		}
+		response, err := translator.process(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i < len(events)-1 {
+			if response != nil {
+				t.Fatal("tool call emitted before arguments completed")
+			}
+			continue
+		}
+		if response == nil || len(response.Candidates) != 1 || len(response.Candidates[0].Content.Parts) != 1 {
+			t.Fatalf("missing tool call: %+v", response)
+		}
+		call := response.Candidates[0].Content.Parts[0].FunctionCall
+		if call == nil || call.Name != "lookup" || call.ID != "call_1" || call.Args["query"] != "hello" {
+			t.Fatalf("tool call identity or arguments lost: %+v", call)
+		}
+	}
+}
