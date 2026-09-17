@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
+	"github.com/Alcova-AI/adk-models-go/internal"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	vercelopenai "github.com/Alcova-AI/adk-models-go/internal/vercelopenai"
@@ -78,6 +79,12 @@ func NewModel(cfg Config) (model.LLM, error) {
 func (m *gatewayModel) Name() string { return m.canonicalModel }
 
 func (m *gatewayModel) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
+	return internal.GenerateWithTimeout(ctx, req, func(callCtx context.Context) iter.Seq2[*model.LLMResponse, error] {
+		return m.generateContent(callCtx, req, stream)
+	})
+}
+
+func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
 	if req == nil {
 		return singleError(ErrRequestNil)
 	}

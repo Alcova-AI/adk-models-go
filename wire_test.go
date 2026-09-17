@@ -3,13 +3,17 @@
 package adkmodels_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	adkanthropic "github.com/Alcova-AI/adk-models-go/anthropic"
@@ -57,7 +61,7 @@ func TestGatewayReasoningWireMatrix(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						request := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}, Config: &genai.GenerateContentConfig{ThinkingConfig: &genai.ThinkingConfig{ThinkingLevel: level}}}
+						request := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}, Config: &genai.GenerateContentConfig{HTTPOptions: &genai.HTTPOptions{Timeout: new(time.Minute)}, ThinkingConfig: &genai.ThinkingConfig{ThinkingLevel: level}}}
 						before, _ := json.Marshal(request)
 						count := 0
 						for _, err := range llm.GenerateContent(t.Context(), request, stream) {
@@ -390,3 +394,59 @@ func TestGatewayAnthropicThoughtDisplay(t *testing.T) {
 		}
 	}
 }
+
+// Exercise real SDK request and stream readers with a cancellable transport.
+func TestRequestTimeoutWireMatrix(t *testing.T) {
+	for _, adapter := range []string{"anthropic", "openai", "vercel"} {
+		for _, stream := range []bool{false, true} {
+			for _, stall := range []string{"headers", "body"} {
+				t.Run(fmt.Sprintf("%s/stream=%t/%s", adapter, stream, stall), func(t *testing.T) {
+					synctest.Test(t, func(t *testing.T) {
+						var body *timeoutBody
+						client := &http.Client{Transport: wireTransport(func(r *http.Request) (*http.Response, error) {
+							if stall == "headers" {
+								<-r.Context().Done()
+								return nil, r.Context().Err()
+							}
+							response := wireResponse(r, adapter, stream)
+							body = &timeoutBody{ctx: r.Context()}
+							response.Body = body
+							return response, nil
+						})}
+						canonical := "claude-test"
+						if adapter == "openai" {
+							canonical = "gpt-5.6-luna"
+						}
+						llm, err := wireModel(adapter, client, adkmodels.ModelConfig{CanonicalModel: canonical})
+						if err != nil {
+							t.Fatal(err)
+						}
+						duration := time.Minute
+						req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}, Config: &genai.GenerateContentConfig{HTTPOptions: &genai.HTTPOptions{Timeout: &duration}}}
+						count := 0
+						for _, err := range llm.GenerateContent(t.Context(), req, stream) {
+							count++
+							if !errors.Is(err, context.DeadlineExceeded) {
+								t.Fatalf("expected request timeout, got %v", err)
+							}
+						}
+						if count != 1 {
+							t.Fatalf("got %d results", count)
+						}
+						if body != nil && !body.closed {
+							t.Fatal("response body not closed")
+						}
+					})
+				})
+			}
+		}
+	}
+}
+
+type timeoutBody struct {
+	ctx    context.Context
+	closed bool
+}
+
+func (b *timeoutBody) Read([]byte) (int, error) { <-b.ctx.Done(); return 0, b.ctx.Err() }
+func (b *timeoutBody) Close() error             { b.closed = true; return nil }

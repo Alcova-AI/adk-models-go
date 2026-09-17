@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Optional request timeouts through `LLMRequest.Config.HTTPOptions.Timeout` for the Anthropic, OpenAI and Vercel adapters. The timeout covers retries and stream consumption, and remains unset by default.
+- Request timeouts preserve `context.DeadlineExceeded`; caller cancellation preserves `context.Canceled`. The timer stops before the final response is handed to downstream tool execution.
+
 ## [v0.1.3] - Provider compatibility
 
 ### Fixed
