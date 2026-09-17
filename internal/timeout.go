@@ -1,7 +1,7 @@
 // Copyright 2026 Alcova AI
 // Licensed under the Apache License, Version 2.0.
 
-package requesttimeout
+package internal
 
 import (
 	"context"

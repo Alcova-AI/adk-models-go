@@ -28,11 +28,11 @@ import (
 	"google.golang.org/genai"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
+	"github.com/Alcova-AI/adk-models-go/internal"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	"github.com/Alcova-AI/adk-models-go/internal/metadata"
 	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
-	"github.com/Alcova-AI/adk-models-go/internal/requesttimeout"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
 	"google.golang.org/adk/v2/model"
 )
@@ -109,7 +109,7 @@ func (m *openAIModel) wireModel() shared.ResponsesModel {
 
 // GenerateContent converts an ADK request and calls the Responses API.
 func (m *openAIModel) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
-	return requesttimeout.GenerateWithTimeout(ctx, req, func(callCtx context.Context) iter.Seq2[*model.LLMResponse, error] {
+	return internal.GenerateWithTimeout(ctx, req, func(callCtx context.Context) iter.Seq2[*model.LLMResponse, error] {
 		return m.generateContent(callCtx, req, stream)
 	})
 }
