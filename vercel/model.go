@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/Alcova-AI/adk-models-go/internal/jsonschema"
 	"io"
 	"iter"
 	"net/http"
@@ -17,13 +16,12 @@ import (
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
+	"github.com/Alcova-AI/adk-models-go/internal/jsonschema"
+	"github.com/Alcova-AI/adk-models-go/internal/protocol"
 	vercelopenai "github.com/Alcova-AI/adk-models-go/internal/vercelopenai"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
-	"google.golang.org/genai"
-
 	"google.golang.org/adk/v2/model"
-
-	"github.com/Alcova-AI/adk-models-go/internal/protocol"
+	"google.golang.org/genai"
 )
 
 const defaultMaxTokens int32 = 16384
@@ -78,6 +76,12 @@ func NewModel(cfg Config) (model.LLM, error) {
 func (m *gatewayModel) Name() string { return m.canonicalModel }
 
 func (m *gatewayModel) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
+	return adkmodels.GenerateWithTimeout(ctx, req, func(callCtx context.Context) iter.Seq2[*model.LLMResponse, error] {
+		return m.generateContent(callCtx, req, stream)
+	})
+}
+
+func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
 	if req == nil {
 		return singleError(ErrRequestNil)
 	}

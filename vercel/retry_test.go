@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/genai"
 )
 
 type trackedBody struct {
@@ -157,4 +160,28 @@ func TestDefaultRetryClientAndSuppliedClient(t *testing.T) {
 	if llm.(*gatewayModel).httpClient != supplied {
 		t.Fatal("supplied client replaced")
 	}
+}
+
+func TestRequestTimeoutIncludesRetryWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		tr := &retryTransport{sleep: retrySleep, base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{StatusCode: 503, Header: http.Header{"Retry-After": []string{"60"}}, Body: io.NopCloser(strings.NewReader("unavailable"))}, nil
+		})}
+		llm, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: tr}, Model: adkmodels.ModelConfig{CanonicalModel: "gpt-test"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		duration := time.Second
+		req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}, Config: &genai.GenerateContentConfig{HTTPOptions: &genai.HTTPOptions{Timeout: &duration}}}
+		for _, err := range llm.GenerateContent(t.Context(), req, false) {
+			if !errors.Is(err, adkmodels.ErrRequestTimeout) {
+				t.Fatal(err)
+			}
+		}
+		if calls != 1 {
+			t.Fatalf("retried past deadline: %d calls", calls)
+		}
+	})
 }

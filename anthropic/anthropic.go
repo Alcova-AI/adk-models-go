@@ -24,18 +24,17 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Alcova-AI/adk-models-go/toolschema"
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/anthropics/anthropic-sdk-go/packages/param"
-	"google.golang.org/genai"
-
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	converters "github.com/Alcova-AI/adk-models-go/internal/anthropicconvert"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	"github.com/Alcova-AI/adk-models-go/internal/metadata"
+	"github.com/Alcova-AI/adk-models-go/toolschema"
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"google.golang.org/adk/v2/model"
+	"google.golang.org/genai"
 )
 
 const defaultMaxTokens = 16384
@@ -128,6 +127,12 @@ func (m *anthropicModel) wireModel() anthropic.Model {
 
 // GenerateContent calls the Anthropic model.
 func (m *anthropicModel) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
+	return adkmodels.GenerateWithTimeout(ctx, req, func(callCtx context.Context) iter.Seq2[*model.LLMResponse, error] {
+		return m.generateContent(callCtx, req, stream)
+	})
+}
+
+func (m *anthropicModel) generateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
 	prepared, err := m.schemas.Prepare(ctx, toolschema.Tools(req))
 	if err != nil {
 		return func(yield func(*model.LLMResponse, error) bool) { yield(nil, err) }

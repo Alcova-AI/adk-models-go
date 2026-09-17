@@ -278,3 +278,16 @@ results, provider-specific limits and instructions for running the tests.
 
 Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
 for development checks, live-test guidance, and contribution terms.
+
+## Request timeouts
+
+Adapters honour `LLMRequest.Config.HTTPOptions.Timeout` when positive. No library
+timeout is added when it is unset or non-positive. Caller deadlines and existing
+SDK/client timeouts still apply. The timeout covers retries and the full response
+stream, starts on iteration, and is released when iteration ends or stops early.
+The stream closes before its final non-partial response is yielded, so downstream
+tool execution does not count towards the model timeout.
+Use `errors.Is(err, adkmodels.ErrRequestTimeout)` to identify this request's own
+expiry; caller cancellation and caller deadline expiry remain context errors.
+`GenerateWithTimeout` provides the same boundary for native or custom adapters
+whose transport honours context cancellation.
