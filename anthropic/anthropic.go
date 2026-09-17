@@ -24,17 +24,18 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Alcova-AI/adk-models-go/toolschema"
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
+	"google.golang.org/genai"
+
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	converters "github.com/Alcova-AI/adk-models-go/internal/anthropicconvert"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	"github.com/Alcova-AI/adk-models-go/internal/metadata"
-	"github.com/Alcova-AI/adk-models-go/toolschema"
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
 )
 
 const defaultMaxTokens = 16384

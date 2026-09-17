@@ -20,19 +20,20 @@ import (
 	"fmt"
 	"iter"
 
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
+	"google.golang.org/genai"
+
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	"github.com/Alcova-AI/adk-models-go/internal/metadata"
 	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
-	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/responses"
-	"github.com/openai/openai-go/v3/shared"
 	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
 )
 
 const defaultMaxTokens = 16384

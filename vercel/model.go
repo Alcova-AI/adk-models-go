@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Alcova-AI/adk-models-go/internal/jsonschema"
 	"io"
 	"iter"
 	"net/http"
@@ -16,12 +17,13 @@ import (
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
-	"github.com/Alcova-AI/adk-models-go/internal/jsonschema"
-	"github.com/Alcova-AI/adk-models-go/internal/protocol"
 	vercelopenai "github.com/Alcova-AI/adk-models-go/internal/vercelopenai"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
-	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
+
+	"google.golang.org/adk/v2/model"
+
+	"github.com/Alcova-AI/adk-models-go/internal/protocol"
 )
 
 const defaultMaxTokens int32 = 16384
