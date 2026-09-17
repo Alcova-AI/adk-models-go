@@ -426,7 +426,7 @@ func TestRequestTimeoutWireMatrix(t *testing.T) {
 						count := 0
 						for _, err := range llm.GenerateContent(t.Context(), req, stream) {
 							count++
-							if !errors.Is(err, adkmodels.ErrRequestTimeout) {
+							if !errors.Is(err, context.DeadlineExceeded) {
 								t.Fatalf("expected request timeout, got %v", err)
 							}
 						}

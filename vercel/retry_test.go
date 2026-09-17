@@ -176,7 +176,7 @@ func TestRequestTimeoutIncludesRetryWait(t *testing.T) {
 		duration := time.Second
 		req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}, Config: &genai.GenerateContentConfig{HTTPOptions: &genai.HTTPOptions{Timeout: &duration}}}
 		for _, err := range llm.GenerateContent(t.Context(), req, false) {
-			if !errors.Is(err, adkmodels.ErrRequestTimeout) {
+			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatal(err)
 			}
 		}

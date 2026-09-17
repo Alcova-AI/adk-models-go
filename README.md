@@ -287,7 +287,6 @@ SDK/client timeouts still apply. The timeout covers retries and the full respons
 stream, starts on iteration, and is released when iteration ends or stops early.
 The stream closes before its final non-partial response is yielded, so downstream
 tool execution does not count towards the model timeout.
-Use `errors.Is(err, adkmodels.ErrRequestTimeout)` to identify this request's own
-expiry; caller cancellation and caller deadline expiry remain context errors.
-`GenerateWithTimeout` provides the same boundary for native or custom adapters
-whose transport honours context cancellation.
+Use `errors.Is(err, context.DeadlineExceeded)` to recognise a timeout. Check the
+caller context to distinguish its deadline from a request timeout. Caller
+cancellation remains `context.Canceled`.

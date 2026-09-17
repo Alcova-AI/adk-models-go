@@ -1,7 +1,7 @@
 // Copyright 2026 Alcova AI
 // Licensed under the Apache License, Version 2.0.
 
-package adkmodels
+package requesttimeout
 
 import (
 	"context"
@@ -10,10 +10,6 @@ import (
 
 	"google.golang.org/adk/v2/model"
 )
-
-// ErrRequestTimeout identifies expiration of a model request's own timeout,
-// distinct from cancellation or expiry of its caller's context.
-var ErrRequestTimeout = errors.New("the model call exceeded its time limit")
 
 // GenerateWithTimeout honours the optional GenAI HTTPOptions.Timeout for an
 // entire invocation, including retries and stream consumption. No timeout is
@@ -26,15 +22,15 @@ func GenerateWithTimeout(ctx context.Context, req *model.LLMRequest, generate fu
 		callCtx := ctx
 		cancel := func() {}
 		if req != nil && req.Config != nil && req.Config.HTTPOptions != nil && req.Config.HTTPOptions.Timeout != nil && *req.Config.HTTPOptions.Timeout > 0 {
-			callCtx, cancel = context.WithTimeoutCause(ctx, *req.Config.HTTPOptions.Timeout, ErrRequestTimeout)
+			callCtx, cancel = context.WithTimeout(ctx, *req.Config.HTTPOptions.Timeout)
 			defer cancel()
 		}
 		failure := func(err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if errors.Is(context.Cause(callCtx), ErrRequestTimeout) {
-				return errors.Join(ErrRequestTimeout, context.DeadlineExceeded, err)
+			if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+				return errors.Join(context.DeadlineExceeded, err)
 			}
 			return err
 		}

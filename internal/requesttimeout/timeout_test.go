@@ -1,7 +1,7 @@
 // Copyright 2026 Alcova AI
 // Licensed under the Apache License, Version 2.0.
 
-package adkmodels
+package requesttimeout
 
 import (
 	"context"
@@ -25,7 +25,7 @@ func TestGenerateWithTimeout(t *testing.T) {
 		parent, own time.Duration
 		want        error
 	}{
-		{"own", 0, time.Minute, ErrRequestTimeout},
+		{"own", 0, time.Minute, context.DeadlineExceeded},
 		{"shorter parent", time.Second, time.Minute, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,8 +44,8 @@ func TestGenerateWithTimeout(t *testing.T) {
 					if !errors.Is(err, tc.want) {
 						t.Fatalf("got %v, want %v", err, tc.want)
 					}
-					if tc.parent > 0 && errors.Is(err, ErrRequestTimeout) {
-						t.Fatal("parent expiry misclassified")
+					if tc.parent == 0 && ctx.Err() != nil {
+						t.Fatal("request timeout cancelled parent")
 					}
 				}
 				if count != 1 {
@@ -93,7 +93,7 @@ func TestGenerateWithTimeoutCallerCancellation(t *testing.T) {
 	for _, err := range GenerateWithTimeout(ctx, timeoutRequest(time.Hour), func(call context.Context) iter.Seq2[*model.LLMResponse, error] {
 		return func(yield func(*model.LLMResponse, error) bool) { cancel(); <-call.Done(); yield(nil, call.Err()) }
 	}) {
-		if !errors.Is(err, context.Canceled) || errors.Is(err, ErrRequestTimeout) {
+		if !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("wrong cancellation: %v", err)
 		}
 	}
