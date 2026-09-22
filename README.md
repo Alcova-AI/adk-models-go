@@ -105,9 +105,19 @@ Anthropic Messages and OpenAI Responses can also be used through Vercel-compatib
 | Gemini | `gemini-*` |
 | Z.ai | `glm-*` |
 
-Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Unrecognised canonical names are rejected. There is no family override.
+Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Direct adapters reject unrecognised canonical names. The native `vercel` adapter
+accepts other unqualified names, including `mimo-v2.6-pro` with
+`RequestModel: "xiaomi/mimo-v2.6-pro"`, without assigning a family mapping.
+Gateway decides whether the requested model and features are available.
+There is no family override.
 
 For request names, recognised family mismatches are rejected. Unknown endpoint aliases are accepted without a family cross-check. An explicitly supplied request name is not rewritten.
+
+For native Gateway models without a known mapping, leave `ThinkingLevel` unset
+(including `Reasoning.DefaultLevel`) to use the provider's reasoning defaults.
+Explicit levels are rejected rather than translated to an unrelated family's
+settings. Streaming, reasoning history and tool calls use the same native
+Gateway protocol. Support for individual features still depends on the model.
 
 ## Reasoning levels
 
@@ -213,7 +223,14 @@ Apache License 2.0. See [LICENSE](LICENSE). Existing copyright notices and appli
 
 Providers support different parts of JSON Schema. The adapters check your tool
 schemas before sending a request and reject rules the selected provider cannot
-preserve. This check is enabled by default; no configuration is needed.
+preserve for known provider profiles. This check is enabled by default; no
+configuration is needed.
+
+Native Vercel models without a family mapping instead receive the validated
+schema with its constraints preserved. The adapter does not claim a verified
+compatibility profile or enable strict decoding for these models. The endpoint
+may reject unsupported schemas, and applications must validate tool arguments
+before executing them. Known families retain their existing compatibility checks.
 
 Define each tool's inputs using **one** of these fields:
 

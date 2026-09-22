@@ -37,6 +37,26 @@ func (c ModelConfig) Validate() error {
 	if err != nil {
 		return err
 	}
+	return c.validate(f)
+}
+
+// ValidateGateway allows native Vercel models without a known family mapping.
+// Known families retain their identity checks. Other models use provider-default
+// reasoning; model availability and feature support are decided by the endpoint.
+func (c ModelConfig) ValidateGateway() error {
+	f, err := family.DetectGateway(c.CanonicalModel)
+	if err != nil {
+		return err
+	}
+	if f == family.Gateway {
+		if _, err := family.Map(f, c.Reasoning.DefaultLevel); err != nil {
+			return err
+		}
+	}
+	return c.validate(f)
+}
+
+func (c ModelConfig) validate(f family.Family) error {
 	if c.RequestModel != "" {
 		if err := family.ValidateRequest(f, c.RequestModel); err != nil {
 			return err

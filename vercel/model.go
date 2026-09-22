@@ -46,11 +46,11 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if cfg.APIKey == "" {
 		return nil, fmt.Errorf("AI Gateway API key is required")
 	}
-	if err := cfg.Model.Validate(); err != nil {
+	if err := cfg.Model.ValidateGateway(); err != nil {
 		return nil, err
 	}
 	cfg.Model.Vercel = gateway.CloneConfig(cfg.Model.Vercel)
-	f, err := family.Detect(cfg.Model.CanonicalModel)
+	f, err := family.DetectGateway(cfg.Model.CanonicalModel)
 	if err != nil {
 		return nil, err
 	}

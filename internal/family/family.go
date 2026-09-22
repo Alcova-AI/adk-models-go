@@ -18,6 +18,7 @@ const (
 	Anthropic Family              = "anthropic"
 	Gemini    Family              = "google"
 	ZAI       Family              = "zai"
+	Gateway   Family              = "gateway"
 	XHigh     genai.ThinkingLevel = "XHIGH"
 	Max       genai.ThinkingLevel = "MAX"
 )
@@ -36,6 +37,19 @@ func Detect(name string) (Family, error) {
 	default:
 		return "", fmt.Errorf("unrecognised canonical model %q", name)
 	}
+}
+
+// DetectGateway retains known mappings while leaving other native Gateway
+// models to the endpoint. It does not infer reasoning or schema capabilities.
+func DetectGateway(name string) (Family, error) {
+	if f, err := Detect(name); err == nil {
+		return f, nil
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || strings.ContainsAny(name, "/ \t\r\n") {
+		return "", fmt.Errorf("canonical model must be a nonempty unqualified name")
+	}
+	return Gateway, nil
 }
 
 // ValidateRequest checks recognised identities without rewriting endpoint aliases.
@@ -102,6 +116,8 @@ func Map(f Family, level genai.ThinkingLevel) (Reasoning, error) {
 		return Reasoning{Effort: string(level)}, nil
 	case ZAI:
 		return Reasoning{Effort: zai(level), Thinking: "enabled"}, nil
+	case Gateway:
+		return Reasoning{}, fmt.Errorf("no thinking-level mapping for this Gateway model; leave ThinkingLevel unset to use provider defaults")
 	default:
 		return Reasoning{}, fmt.Errorf("unsupported model family %q", f)
 	}
