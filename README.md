@@ -1,58 +1,67 @@
+<a name="readme-top"></a>
+
+<div align="center">
+  <a href="https://github.com/Alcova-AI/adk-models-go/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Alcova-AI/adk-models-go" alt="Licence"></a>
+  <a href="https://pkg.go.dev/github.com/Alcova-AI/adk-models-go"><img src="https://pkg.go.dev/badge/github.com/Alcova-AI/adk-models-go.svg" alt="Go Reference"></a>
+  <a href="https://github.com/Alcova-AI/adk-models-go/releases"><img src="https://img.shields.io/github/v/release/Alcova-AI/adk-models-go" alt="Release"></a>
+  <a href="https://github.com/Alcova-AI/adk-models-go/actions/workflows/test.yml"><img src="https://github.com/Alcova-AI/adk-models-go/actions/workflows/test.yml/badge.svg" alt="Test"></a>
+</div>
+
+---
+
 # ADK Models Go
 
-Anthropic, OpenAI and Vercel model adapters for Google's Agent Development Kit for Go.
+**Run Claude, GPT, Gemini and GLM models inside Google's [Agent Development Kit for Go](https://github.com/google/adk-go).** One Go module with Anthropic, OpenAI and Vercel AI Gateway adapters that share model detection, reasoning levels, configuration and response metadata. Open source under Apache 2.0.
 
-`adk-models-go` combines `adk-anthropic-go`, `adk-openai-go` and `adk-vercel-go` into one Go module. It provides shared model-family detection, reasoning mappings, configuration and response metadata while preserving each adapter's request format.
+---
 
-> **Development status:** The initial release is under development. This README describes the approved interface. Installation and migration require a published version.
+## Why ADK Models Go?
 
-## Adapters
+- **One module, three adapters**: `anthropic`, `openai` and `vercel` packages share one version and one `ModelConfig`. This replaces the separate `adk-anthropic-go`, `adk-openai-go` and `adk-vercel-go` modules.
+- **One reasoning scale for every model**: set `genai.ThinkingLevel` once. The adapters map it to each family's native setting (see [family mappings](#family-mappings)).
+- **You own the client**: pass your own Anthropic or OpenAI SDK client, so authentication, endpoints, retries and HTTP behaviour stay under your control.
+- **Any model through Vercel**: route across providers with typed routing, zero-data-retention and caching settings on `VercelConfig`.
+- **Tool schemas checked before sending**: each adapter rejects JSON Schema rules the provider cannot keep, instead of letting the provider drop them without notice. See the [live schema matrix](testdata/schema-matrix/README.md).
+- **No hidden fallbacks**: the library never switches request format, lowers reasoning effort, weakens retention, or strips caching and retries. Provider errors reach you unchanged.
 
-Each adapter implements ADK's `model.LLM` interface. Choose the request format explicitly.
+---
 
-| Package | Request format | Client |
-|---|---|---|
-| `anthropic` | Anthropic Messages | Caller-supplied Anthropic SDK client |
-| `openai` | OpenAI Responses | Caller-supplied OpenAI SDK client |
-| `vercel` | Native Vercel | Optional HTTP client |
+## Feature overview
 
-Direct Anthropic and OpenAI adapters require their own model family. Cross-family requests require Vercel. Direct Gemini stays on Google ADK's existing Gemini adapter; Gemini through Vercel uses this library.
+| Feature | Description |
+|---------|-------------|
+| [**Direct Anthropic**](#direct-anthropic) | Claude through the Anthropic Messages API, with your SDK client |
+| [**Direct OpenAI**](#direct-openai) | GPT and o-series through the OpenAI Responses API, with your SDK client |
+| [**Vercel AI Gateway**](#vercel-ai-gateway) | Any supported model family through Vercel's native protocol |
+| [**Reasoning levels**](#reasoning-levels) | One thinking scale mapped to each model family |
+| [**Prompt caching**](#prompt-caching) | Anthropic breakpoints, OpenAI cache modes and gateway-managed caching |
+| [**Response metadata**](#response-metadata) | Response IDs, cache-write tokens, gateway routing and cost |
+| [**Tool schema compatibility**](#tool-schema-compatibility) | Checks tool schemas against each provider before sending |
+| [**Request timeouts**](#request-timeouts) | Optional per-request timeout that covers retries and streaming |
 
-The library does not switch adapters automatically. Model-family recognition does not guarantee that every endpoint supports that model or its features.
+---
 
-## Installation
+## Quick start
 
-After the first release is published:
+Install the module. All adapter packages share one version.
 
 ```bash
 go get github.com/Alcova-AI/adk-models-go
 ```
 
-All adapter packages share one module version.
-
-## Direct OpenAI
-
-Construct the SDK client to control authentication, endpoint selection, HTTP behaviour and SDK options.
+Every adapter returns an ADK `model.LLM`. Pass it to any ADK agent:
 
 ```go
-import (
-    adkmodels "github.com/Alcova-AI/adk-models-go"
-    adkopenai "github.com/Alcova-AI/adk-models-go/openai"
-
-    openaisdk "github.com/openai/openai-go/v3"
-    "github.com/openai/openai-go/v3/option"
-)
-
-client := openaisdk.NewClient(option.WithAPIKey(apiKey))
-llm, err := adkopenai.NewModel(adkopenai.Config{
-    Client: client,
-    Model: adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna"},
+agent, err := llmagent.New(llmagent.Config{
+    Name:        "assistant",
+    Model:       llm, // from any adapter below
+    Instruction: "You are a helpful assistant.",
 })
 ```
 
-The OpenAI adapter always sends `store: false`. ADK owns conversation history, including the opaque reasoning state needed for later turns.
+### Direct Anthropic
 
-## Direct Anthropic
+Use Claude models through the Anthropic Messages API.
 
 ```go
 import (
@@ -63,14 +72,40 @@ import (
     "github.com/anthropics/anthropic-sdk-go/option"
 )
 
-client := anthropicsdk.NewClient(option.WithAPIKey(apiKey))
+client := anthropicsdk.NewClient(option.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
+
 llm, err := adkanthropic.NewModel(adkanthropic.Config{
     Client: client,
-    Model: adkmodels.ModelConfig{CanonicalModel: "claude-sonnet-4-6"},
+    Model:  adkmodels.ModelConfig{CanonicalModel: "claude-sonnet-4-6"},
 })
 ```
 
-## Native Vercel
+### Direct OpenAI
+
+Use OpenAI models through the Responses API.
+
+```go
+import (
+    adkmodels "github.com/Alcova-AI/adk-models-go"
+    adkopenai "github.com/Alcova-AI/adk-models-go/openai"
+
+    openaisdk "github.com/openai/openai-go/v3"
+    "github.com/openai/openai-go/v3/option"
+)
+
+client := openaisdk.NewClient(option.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
+
+llm, err := adkopenai.NewModel(adkopenai.Config{
+    Client: client,
+    Model:  adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna"},
+})
+```
+
+The OpenAI adapter always sends `store: false`. ADK owns the conversation history, including the opaque reasoning state that later turns need.
+
+### Vercel AI Gateway
+
+Use any supported model family through one gateway, with routing and retention controls.
 
 ```go
 import (
@@ -79,24 +114,44 @@ import (
 )
 
 llm, err := adkvercel.NewModel(adkvercel.Config{
-    APIKey: apiKey,
+    APIKey: os.Getenv("AI_GATEWAY_API_KEY"),
     Model: adkmodels.ModelConfig{
         CanonicalModel: "gpt-5.6-luna",
-        RequestModel: "openai/gpt-5.6-luna",
+        RequestModel:   "openai/gpt-5.6-luna",
+        Vercel: &adkmodels.VercelConfig{
+            ZeroDataRetention: true,
+            Sort:              adkmodels.GatewaySortTTFT,
+        },
     },
 })
 ```
 
-Native Vercel accepts optional `BaseURL`, `HTTPClient` and `Headers` settings. If no HTTP client is supplied, it creates a dedicated client with two retries for connection failures and HTTP 408, 409, 429 and 5xx responses. It respects `x-should-retry` and `Retry-After` (up to 60 seconds), otherwise using exponential backoff with jitter. Cancellation stops retries. Supplied clients are used unchanged. Errors after a successful response starts streaming are returned without retry.
+The native Vercel adapter also accepts optional `BaseURL`, `HTTPClient` and `Headers`. It supports Google Enterprise Web Search through `genai.Tool.EnterpriseWebSearch` and returns source links as grounding metadata.
 
-Anthropic Messages and OpenAI Responses can also be used through Vercel-compatible endpoints. Configure their endpoint through the supplied SDK client and their gateway behaviour through `ModelConfig.Vercel`.
+---
 
-## Model names
+## Choosing an adapter
+
+Each adapter implements ADK's `model.LLM` interface. Choose the request format explicitly. The library does not switch adapters for you.
+
+| Package | Request format | Client | Model families |
+|---|---|---|---|
+| `anthropic` | Anthropic Messages | Your Anthropic SDK client | Anthropic |
+| `openai` | OpenAI Responses | Your OpenAI SDK client | OpenAI |
+| `vercel` | Native Vercel | Optional HTTP client | Any recognised family |
+
+- For direct Gemini, use Google ADK's own Gemini adapter. For Gemini through Vercel, use this library.
+- To call a model from a different family, use the `vercel` adapter.
+- You can also point the `anthropic` and `openai` adapters at Vercel-compatible endpoints. Set the endpoint on your SDK client and the gateway behaviour in `ModelConfig.Vercel`.
+
+A recognised model family does not guarantee that an endpoint supports that model or all its features.
+
+### Model names
 
 | Field | Purpose |
 |---|---|
-| `CanonicalModel` | Stable model identity used to select the model-family mapping |
-| `RequestModel` | Exact identifier sent to the endpoint; defaults to `CanonicalModel` |
+| `CanonicalModel` | Stable model identity. Selects the model-family mapping. |
+| `RequestModel` | Exact identifier sent to the endpoint. Defaults to `CanonicalModel`. |
 
 | Model family | Recognised canonical patterns |
 |---|---|
@@ -105,9 +160,13 @@ Anthropic Messages and OpenAI Responses can also be used through Vercel-compatib
 | Gemini | `gemini-*` |
 | Z.ai | `glm-*` |
 
-Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Unrecognised canonical names are rejected. There is no family override.
+- Family detection ignores case and surrounding spaces.
+- Canonical names must not have a gateway prefix. Put prefixes such as `openai/` in `RequestModel`.
+- The library rejects unrecognised canonical names. There is no family override.
+- The library rejects a request name from a different recognised family. It accepts unknown endpoint aliases without a family check.
+- The library never rewrites a request name you supply.
 
-For request names, recognised family mismatches are rejected. Unknown endpoint aliases are accepted without a family cross-check. An explicitly supplied request name is not rewritten.
+---
 
 ## Reasoning levels
 
@@ -115,16 +174,16 @@ Set reasoning through ADK's `genai.ThinkingConfig`:
 
 ```go
 thinking := &genai.ThinkingConfig{
-    ThinkingLevel: genai.ThinkingLevelHigh,
+    ThinkingLevel:   genai.ThinkingLevelHigh,
     IncludeThoughts: true,
 }
 ```
 
-The library also exposes `adkmodels.ThinkingLevelXHigh` and `adkmodels.ThinkingLevelMax`. These use the existing `genai.ThinkingLevel` type and can be used in backend code and model-route configuration.
+The library adds `adkmodels.ThinkingLevelXHigh` and `adkmodels.ThinkingLevelMax`. They use the existing `genai.ThinkingLevel` type, so you can use them in backend code and model-route configuration. Set a route default with `ModelConfig.Reasoning.DefaultLevel`.
 
 ### Family mappings
 
-The same model-family mapping applies across adapters.
+The same mapping applies across all adapters.
 
 | Requested level | OpenAI effort | Anthropic effort / thinking | Gemini level | Z.ai effort |
 |---|---|---|---|---|
@@ -135,87 +194,63 @@ The same model-family mapping applies across adapters.
 | `XHIGH` | `xhigh` | `xhigh` / adaptive | `HIGH` | `max` |
 | `MAX` | `xhigh` | `max` / adaptive | `HIGH` | `max` |
 
-Z.ai thinking remains enabled for explicit levels. If no level is supplied or configured as a caller-selected default, the library leaves it unset and uses the model's default. Explicit reasoning-token budgets are rejected.
-
-Gemini levels keep their GenAI meaning; Vercel provider options encode them in lowercase (`HIGH` becomes `high`).
-
-The library does not maintain model-specific exceptions. If a model or endpoint rejects a mapped setting, its error is returned without retrying at a different level.
-
-When Anthropic tool use is forced, the adapter preserves its existing exception: omit thinking and clear adaptive effort. This applies to Messages fields and gateway provider options without changing the caller's configuration.
+- Z.ai thinking stays on for explicit levels. With no level set, the library leaves it unset and the model uses its default.
+- The library rejects explicit reasoning-token budgets.
+- Gemini levels keep their GenAI meaning. Vercel provider options send them in lowercase (`HIGH` becomes `high`).
+- The library has no model-specific exceptions. If a model or endpoint rejects a mapped setting, you get its error. The library does not retry at a different level.
+- When Anthropic tool use is forced, the adapter omits thinking and clears adaptive effort for that request. This applies to Messages fields and gateway provider options. Your configuration does not change.
 
 ### Reasoning summaries
 
-`IncludeThoughts` controls whether reasoning summaries are returned. It does not change reasoning effort. Opaque reasoning state required for later turns is preserved even when summaries are hidden.
+`IncludeThoughts` controls whether reasoning summaries are returned. It does not change reasoning effort. The adapters keep the opaque reasoning state that later turns need, even when summaries are hidden.
+
+---
 
 ## Vercel configuration
 
-All Vercel-specific behaviour belongs in `VercelConfig`, supplied through `ModelConfig.Vercel`. This includes gateway routing, data-retention requirements, gateway-managed caching and gateway-specific provider options.
+Put all Vercel-specific behaviour in `VercelConfig` and supply it through `ModelConfig.Vercel`. This covers gateway routing, data retention, gateway-managed caching and gateway provider options.
 
-Retention is allowed by default. Callers can explicitly require zero data retention. The library sends that requirement to Vercel and returns any gateway error; it does not weaken the requirement or maintain a local provider-support catalogue.
+- Retention is allowed by default. Set `ZeroDataRetention: true` to require zero data retention.
+- The library sends that requirement to Vercel and returns any gateway error. It never weakens the requirement and keeps no local list of which providers support it.
+- OpenAI's `store: false` applies whatever the gateway retention setting is.
+- The library rejects raw provider options that conflict with typed settings.
 
-OpenAI's `store: false` remains in effect regardless of the gateway retention setting. Raw provider options that conflict with typed settings are rejected.
+---
 
 ## Prompt caching
 
-Caching controls are unset by default. Provider-managed caching may still occur.
+Caching controls are unset by default. Providers may still cache on their own.
 
-When explicitly configured:
+Set caching through `ModelConfig.PromptCaching`:
 
-- Anthropic retains its cache lifetimes and distinct cache boundaries.
-- OpenAI retains its cache modes, keys and boundary rules.
-- Gateway-managed caching is configured through `VercelConfig`.
-- Unsupported optional features, such as cache breakpoints, are ignored.
+- **Anthropic**: set `Anthropic.Mode` to `AnthropicPromptCacheManual`, then set breakpoints with their lifetimes.
+- **OpenAI**: set `OpenAI.Mode` to implicit or explicit, with an optional cache key and breakpoints.
+- **Vercel**: set `VercelConfig.Caching` to `GatewayCachingAuto` for gateway-managed caching.
 
-Conflicting configuration remains an error. The library does not strip settings and retry after a provider rejects a request.
+The adapters ignore optional features that a route does not support, such as cache breakpoints. Conflicting configuration is an error. The library does not strip settings and retry after a provider rejects a request.
+
+---
 
 ## Response metadata
 
 ```go
 metadata, ok := adkmodels.MetadataFromResponse(response)
+if ok && metadata.CostUSD != nil {
+    fmt.Println(metadata.ResolvedProvider, *metadata.CostUSD)
+}
 ```
 
-Shared metadata includes response identity, cache-write token counts, gateway routing and attempt information, optional cost, and separate raw provider metadata. ADK's standard token-usage fields remain the standard usage interface.
+`Metadata` includes the response ID, cache-write token counts, gateway routing and attempt counts, optional cost, and the raw provider metadata. ADK's standard token-usage fields stay the main usage interface.
 
-The caller decides what to log or attach to traces. The library does not automatically log returned metadata or add it to traces.
+The library does not log metadata or add it to traces. You decide what to record.
 
-## Errors and retries
-
-Anthropic and OpenAI preserve retries configured through caller-supplied SDK clients. Native Vercel adds two HTTP retries only when no client is supplied, as described above.
-
-The library does not automatically switch request formats, reduce reasoning effort after an error, weaken retention requirements, or remove caching settings and retry. Provider and gateway errors retain their meaning.
-
-## Migrating from the separate adapters
-
-| Previous module | New adapter package |
-|---|---|
-| `github.com/Alcova-AI/adk-anthropic-go/v3` | `github.com/Alcova-AI/adk-models-go/anthropic` |
-| `github.com/Alcova-AI/adk-openai-go` | `github.com/Alcova-AI/adk-models-go/openai` |
-| `github.com/Alcova-AI/adk-vercel-go` | `github.com/Alcova-AI/adk-models-go/vercel` |
-
-Migration requires configuration changes, not just new imports:
-
-1. Move shared model settings into `adkmodels.ModelConfig`.
-2. Move gateway-specific behaviour into `VercelConfig`.
-3. Use the shared reasoning levels and family mappings.
-4. Use the shared metadata accessor.
-5. Check the new retention default: explicitly require zero data retention where needed.
-6. Remove caller-side workarounds that would override the shared mappings.
-
-For the Alcova backend, remove `lunaReasoningModel` and its factory hook from [PR #2322](https://github.com/Alcova-AI/alcova-backend/pull/2322) in the same migration. The shared OpenAI mapping translates `MINIMAL` to `none`; retaining the wrapper would incorrectly change it to `LOW` first.
-
-Existing adapter releases remain available during migration.
-
-## Licence
-
-Apache License 2.0. See [LICENSE](LICENSE). Existing copyright notices and applicable [third-party attribution](THIRD_PARTY_NOTICES.md) are preserved.
+---
 
 ## Tool schema compatibility
 
-Providers support different parts of JSON Schema. The adapters check your tool
-schemas before sending a request and reject rules the selected provider cannot
-preserve. This check is enabled by default; no configuration is needed.
+Providers support different parts of JSON Schema. The adapters check your tool schemas before they send a request. They reject rules that the selected provider cannot keep. This check is on by default and needs no configuration.
 
-Define each tool's inputs using **one** of these fields:
+Define each tool's inputs with **one** of these fields:
 
 - `Parameters`: a typed `genai.Schema`.
 - `ParametersJsonSchema`: a JSON-serialisable JSON Schema 2020-12 object.
@@ -224,69 +259,92 @@ The root schema must describe an object. Do not set both fields on the same tool
 
 ### Allowing unsupported rules
 
-If a provider cannot support your schema, the default is to return an error.
-You can allow the adapter to remove or weaken unsupported rules:
+By default, the adapter returns an error when a provider cannot support your schema. To let the adapter remove or weaken unsupported rules instead:
 
 ```go
 import "github.com/Alcova-AI/adk-models-go/toolschema"
 
-// In your model configuration:
 Model: adkmodels.ModelConfig{
     CanonicalModel: "gpt-5.6-luna",
-    ToolSchemas: toolschema.Config{AllowUnsupported: true},
+    ToolSchemas:    toolschema.Config{AllowUnsupported: true},
 }
 ```
 
-Use this option only when your application validates tool arguments before
-executing them. The provider may return values that break the original rules.
-Invalid schemas, unknown keywords and unsupported references still return errors.
+Use this option only when your application validates tool arguments before it runs a tool. The provider may return values that break the original rules. Invalid schemas, unknown keywords and unsupported references still return errors.
 
-The adapter logs a warning for each changed rule. Set `ToolSchemas.Warn` if you
-want to handle these warnings yourself. Warnings identify the tool and rule;
-they do not include schema values or tool arguments.
+The adapter logs a warning for each changed rule. Set `ToolSchemas.Warn` to handle warnings yourself. Warnings name the tool and the rule. They do not include schema values or tool arguments.
 
 ### What to expect from each provider
 
-The adapters use strict mode where the provider can preserve the schema.
-Some schemas need the opt-in above, such as open objects, certain optional
-fields, or rules that a provider does not support. Even with strict mode,
-validate arguments before executing a tool.
+- The adapters use strict mode where the provider can keep the schema. Even with strict mode, validate arguments before you run a tool.
+- Some schemas need `AllowUnsupported`, such as open objects, some optional fields, or rules a provider does not support.
+- For OpenAI through Vercel Responses, `AllowUnsupported` also handles optional, non-nullable typed fields. The model can return a null marker for an omitted field, and the adapter removes that marker from the final arguments. Required fields and fields that already allow null keep their meaning. This also covers named local references and simple nullable alternatives.
+- All routes accept acyclic named local references (`#/$defs/name` or `#/definitions/name`). The adapters reject external and recursive references, anchors and nested reference scopes. Provider schema complexity limits still apply.
+- Gemini through Vercel receives complete alternatives for type lists such as `["array", "null"]`. Item rules and descriptions stay inside each alternative. Descriptions on explicit alternatives move into their branches. Unsupported combinations of `anyOf` with other assertions stay errors, even with `AllowUnsupported`, so no assertion is lost without notice. Native Vertex keeps its existing JSON Schema representation.
 
-For OpenAI through Vercel Responses, the opt-in also handles optional,
-non-nullable typed fields: the model can return a null marker for an omitted
-field, and the adapter removes that marker from the final arguments. Required
-fields and fields that already allow null keep their meaning. This also covers
-named local references and simple nullable alternatives.
+See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes, results, provider limits and how to run the tests.
 
-All routes accept acyclic named local references (`#/$defs/name` or
-`#/definitions/name`). References stay in the same tool schema. External and
-recursive references, anchors and nested reference scopes are rejected;
-provider schema complexity limits still apply.
-
-Gemini through Vercel receives complete alternatives for type lists such as
-`["array", "null"]`. Item rules and descriptions stay inside each alternative,
-avoiding Gateway conversion that places fields beside Google's `anyOf`.
-Descriptions on explicit alternatives are moved into their branches. Unsupported
-combinations of `anyOf` with otherwise-supported assertion siblings remain errors,
-even with fallback, rather than silently losing those assertions. Native Vertex keeps its existing
-JSON Schema representation.
-
-See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes,
-results, provider-specific limits and instructions for running the tests.
-
-## Contributing
-
-Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for development checks, live-test guidance, and contribution terms.
+---
 
 ## Request timeouts
 
-Adapters honour `LLMRequest.Config.HTTPOptions.Timeout` when positive. No library
-timeout is added when it is unset or non-positive. Caller deadlines and existing
-SDK/client timeouts still apply. The timeout covers retries and the full response
-stream, starts on iteration, and is released when iteration ends or stops early.
-The stream closes before its final non-partial response is yielded, so downstream
-tool execution does not count towards the model timeout.
-Use `errors.Is(err, context.DeadlineExceeded)` to recognise a timeout. Check the
-caller context to distinguish its deadline from a request timeout. Caller
-cancellation remains `context.Canceled`.
+The adapters honour `LLMRequest.Config.HTTPOptions.Timeout` when it is positive. When it is unset or not positive, the library adds no timeout. Your context deadlines and SDK client timeouts still apply.
+
+- The timeout covers retries and the full response stream.
+- It starts when you begin to iterate and ends when iteration ends or stops early.
+- The stream closes before the final non-partial response, so tool execution after it does not count towards the model timeout.
+- Use `errors.Is(err, context.DeadlineExceeded)` to detect a timeout. Check your own context to tell your deadline apart from the request timeout. Caller cancellation stays `context.Canceled`.
+
+---
+
+## Errors and retries
+
+- The Anthropic and OpenAI adapters keep the retries you configure on your SDK client.
+- The native Vercel adapter adds two HTTP retries only when you do not supply an HTTP client. It retries connection failures and HTTP 408, 409, 429 and 5xx responses.
+- It respects `x-should-retry` and `Retry-After` (up to 60 seconds). Otherwise it uses exponential backoff with jitter.
+- Cancellation stops retries. A supplied HTTP client is used unchanged.
+- Errors after a response starts streaming are returned without a retry.
+
+---
+
+## Migrating from the separate adapters
+
+| Previous module | New package |
+|---|---|
+| `github.com/Alcova-AI/adk-anthropic-go/v3` | `github.com/Alcova-AI/adk-models-go/anthropic` |
+| `github.com/Alcova-AI/adk-openai-go` | `github.com/Alcova-AI/adk-models-go/openai` |
+| `github.com/Alcova-AI/adk-vercel-go` | `github.com/Alcova-AI/adk-models-go/vercel` |
+
+Migration needs configuration changes, not only new imports:
+
+1. Move shared model settings into `adkmodels.ModelConfig`.
+2. Move gateway-specific behaviour into `VercelConfig`.
+3. Use the shared reasoning levels and family mappings.
+4. Use `adkmodels.MetadataFromResponse` for response metadata.
+5. Check the new retention default. Set `ZeroDataRetention: true` where you need it.
+6. Remove caller-side workarounds that override the shared mappings. For example, the OpenAI mapping sends `MINIMAL` as `none`. A wrapper that changes `MINIMAL` to `LOW` first now gives the wrong result.
+
+Existing releases of the separate adapters stay available while you migrate.
+
+---
+
+## Resources
+
+- [Go package reference](https://pkg.go.dev/github.com/Alcova-AI/adk-models-go)
+- [Changelog](CHANGELOG.md)
+- [Live schema matrix](testdata/schema-matrix/README.md)
+- [Google ADK for Go](https://github.com/google/adk-go)
+
+---
+
+## Contributing
+
+Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for development checks, live-test guidance and contribution terms.
+
+---
+
+## Licence
+
+Licensed under the [Apache License 2.0](LICENSE). Existing copyright notices and [third-party attributions](THIRD_PARTY_NOTICES.md) are preserved.
+
+<p align="right"><a href="#readme-top">↑ Back to top</a></p>
