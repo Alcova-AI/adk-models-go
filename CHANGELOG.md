@@ -4,7 +4,7 @@
 
 ### Added
 
-- Recognise DeepSeek V4.1 Flash and support provider-default reasoning without imposing a serving-provider restriction.
+- Recognise the `deepseek-*` model family and support provider-default reasoning without imposing a serving-provider restriction.
 
 - Optional request timeouts through `LLMRequest.Config.HTTPOptions.Timeout` for the Anthropic, OpenAI and Vercel adapters. The timeout covers retries and stream consumption, and remains unset by default.
 - Request timeouts preserve `context.DeadlineExceeded`; caller cancellation preserves `context.Canceled`. The timer stops before the final response is handed to downstream tool execution.

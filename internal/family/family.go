@@ -26,7 +26,7 @@ const (
 func Detect(name string) (Family, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch {
-	case name == "deepseek-v4.1-flash":
+	case strings.HasPrefix(name, "deepseek-"):
 		return DeepSeek, nil
 	case strings.HasPrefix(name, "gpt-"), name == "o1", strings.HasPrefix(name, "o1-"), name == "o3", strings.HasPrefix(name, "o3-"), name == "o4", strings.HasPrefix(name, "o4-"):
 		return OpenAI, nil

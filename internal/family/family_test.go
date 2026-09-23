@@ -46,14 +46,14 @@ func TestNames(t *testing.T) {
 		name string
 		want Family
 	}{
-		{"  GPT-5.6-luna  ", OpenAI}, {"o1", OpenAI}, {"o1-mini", OpenAI}, {"o3", OpenAI}, {"o3-pro", OpenAI}, {"o4", OpenAI}, {"o4-mini", OpenAI}, {"claude-opus-4-7", Anthropic}, {"Gemini-3-pro", Gemini}, {"GLM-5.3", ZAI}, {"deepseek-v4.1-flash", DeepSeek},
+		{"  GPT-5.6-luna  ", OpenAI}, {"o1", OpenAI}, {"o1-mini", OpenAI}, {"o3", OpenAI}, {"o3-pro", OpenAI}, {"o4", OpenAI}, {"o4-mini", OpenAI}, {"claude-opus-4-7", Anthropic}, {"Gemini-3-pro", Gemini}, {"GLM-5.3", ZAI}, {"deepseek-v4.1-flash", DeepSeek}, {"deepseek-v3", DeepSeek}, {"deepseek-v4.1-pro", DeepSeek}, {"  DEEPSEEK-R1  ", DeepSeek},
 	} {
 		got, err := Detect(tt.name)
 		if err != nil || got != tt.want {
 			t.Errorf("%q: %q %v", tt.name, got, err)
 		}
 	}
-	for _, name := range []string{"", "custom", "openai/gpt-5.6-luna", "o5", "o11", "deepseek-v3", "deepseek-v4.1-pro"} {
+	for _, name := range []string{"", "custom", "openai/gpt-5.6-luna", "o5", "o11", "deepseek", "deepseekish-v4", "deepseek/deepseek-v4.1-flash"} {
 		if _, err := Detect(name); err == nil {
 			t.Errorf("accepted %q", name)
 		}

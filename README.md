@@ -104,7 +104,7 @@ Anthropic Messages and OpenAI Responses can also be used through Vercel-compatib
 | Anthropic | `claude-*` |
 | Gemini | `gemini-*` |
 | Z.ai | `glm-*` |
-| DeepSeek | `deepseek-v4.1-flash` |
+| DeepSeek | `deepseek-*` |
 
 Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Unrecognised canonical names are rejected. There is no family override.
 
@@ -127,7 +127,7 @@ The library also exposes `adkmodels.ThinkingLevelXHigh` and `adkmodels.ThinkingL
 
 The same model-family mapping applies across adapters.
 
-DeepSeek V4.1 Flash currently supports provider-default reasoning only: leave the level unset or use `genai.ThinkingLevelUnspecified`. Explicit levels return an error. The verified route is the native Vercel adapter with `deepseek/deepseek-v4.1-flash` and `Only: []string{"deepinfra"}`. Model recognition does not imply PDF support on other serving providers.
+The DeepSeek family mapping currently supports provider-default reasoning only: leave the level unset or use `genai.ThinkingLevelUnspecified`. Explicit levels return an error. The verified route is the native Vercel adapter with `deepseek/deepseek-v4.1-flash` and `Only: []string{"deepinfra"}`. Model recognition does not imply PDF support on other serving providers.
 
 | Requested level | OpenAI effort | Anthropic effort / thinking | Gemini level | Z.ai effort |
 |---|---|---|---|---|
