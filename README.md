@@ -104,6 +104,7 @@ Anthropic Messages and OpenAI Responses can also be used through Vercel-compatib
 | Anthropic | `claude-*` |
 | Gemini | `gemini-*` |
 | Z.ai | `glm-*` |
+| DeepSeek | `deepseek-v4.1-flash` |
 
 Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Unrecognised canonical names are rejected. There is no family override.
 
@@ -126,6 +127,8 @@ The library also exposes `adkmodels.ThinkingLevelXHigh` and `adkmodels.ThinkingL
 
 The same model-family mapping applies across adapters.
 
+DeepSeek V4.1 Flash currently supports provider-default reasoning only: leave the level unset or use `genai.ThinkingLevelUnspecified`. Explicit levels return an error. The verified route is the native Vercel adapter with `deepseek/deepseek-v4.1-flash` and `Only: []string{"deepinfra"}`. Model recognition does not imply PDF support on other serving providers.
+
 | Requested level | OpenAI effort | Anthropic effort / thinking | Gemini level | Z.ai effort |
 |---|---|---|---|---|
 | `MINIMAL` | `none` | `low` / disabled | `MINIMAL` | `low` |
@@ -139,7 +142,7 @@ Z.ai thinking remains enabled for explicit levels. If no level is supplied or co
 
 Gemini levels keep their GenAI meaning; Vercel provider options encode them in lowercase (`HIGH` becomes `high`).
 
-The library does not maintain model-specific exceptions. If a model or endpoint rejects a mapped setting, its error is returned without retrying at a different level.
+If a model or endpoint rejects a supported mapped setting, its error is returned without retrying at a different level.
 
 When Anthropic tool use is forced, the adapter preserves its existing exception: omit thinking and clear adaptive effort. This applies to Messages fields and gateway provider options without changing the caller's configuration.
 

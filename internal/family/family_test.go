@@ -46,14 +46,14 @@ func TestNames(t *testing.T) {
 		name string
 		want Family
 	}{
-		{"  GPT-5.6-luna  ", OpenAI}, {"o1", OpenAI}, {"o1-mini", OpenAI}, {"o3", OpenAI}, {"o3-pro", OpenAI}, {"o4", OpenAI}, {"o4-mini", OpenAI}, {"claude-opus-4-7", Anthropic}, {"Gemini-3-pro", Gemini}, {"GLM-5.3", ZAI},
+		{"  GPT-5.6-luna  ", OpenAI}, {"o1", OpenAI}, {"o1-mini", OpenAI}, {"o3", OpenAI}, {"o3-pro", OpenAI}, {"o4", OpenAI}, {"o4-mini", OpenAI}, {"claude-opus-4-7", Anthropic}, {"Gemini-3-pro", Gemini}, {"GLM-5.3", ZAI}, {"deepseek-v4.1-flash", DeepSeek},
 	} {
 		got, err := Detect(tt.name)
 		if err != nil || got != tt.want {
 			t.Errorf("%q: %q %v", tt.name, got, err)
 		}
 	}
-	for _, name := range []string{"", "custom", "openai/gpt-5.6-luna", "o5", "o11"} {
+	for _, name := range []string{"", "custom", "openai/gpt-5.6-luna", "o5", "o11", "deepseek-v3", "deepseek-v4.1-pro"} {
 		if _, err := Detect(name); err == nil {
 			t.Errorf("accepted %q", name)
 		}
@@ -67,5 +67,25 @@ func TestNames(t *testing.T) {
 		if err := ValidateRequest(OpenAI, tt.name); (err != nil) != tt.bad {
 			t.Errorf("%q: %v", tt.name, err)
 		}
+	}
+}
+
+func TestDeepSeekProviderDefault(t *testing.T) {
+	for _, level := range []genai.ThinkingLevel{"", genai.ThinkingLevelUnspecified} {
+		got, err := Map(DeepSeek, level)
+		if err != nil || got != (Reasoning{}) {
+			t.Fatalf("default: %+v %v", got, err)
+		}
+	}
+	for _, level := range []genai.ThinkingLevel{genai.ThinkingLevelMinimal, genai.ThinkingLevelLow, genai.ThinkingLevelMedium, genai.ThinkingLevelHigh, XHigh, Max} {
+		if _, err := Map(DeepSeek, level); err == nil {
+			t.Fatalf("accepted unverified level %q", level)
+		}
+	}
+	if err := ValidateRequest(OpenAI, "deepseek/deepseek-v4.1-flash"); err == nil {
+		t.Fatal("accepted mismatched family")
+	}
+	if err := ValidateRequest(DeepSeek, "deepseek/gpt-5.6-luna"); err == nil {
+		t.Fatal("accepted mismatched model")
 	}
 }

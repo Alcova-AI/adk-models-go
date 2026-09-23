@@ -14,6 +14,7 @@ import (
 type Family string
 
 const (
+	DeepSeek  Family              = "deepseek"
 	OpenAI    Family              = "openai"
 	Anthropic Family              = "anthropic"
 	Gemini    Family              = "google"
@@ -25,6 +26,8 @@ const (
 func Detect(name string) (Family, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch {
+	case name == "deepseek-v4.1-flash":
+		return DeepSeek, nil
 	case strings.HasPrefix(name, "gpt-"), name == "o1", strings.HasPrefix(name, "o1-"), name == "o3", strings.HasPrefix(name, "o3-"), name == "o4", strings.HasPrefix(name, "o4-"):
 		return OpenAI, nil
 	case strings.HasPrefix(name, "claude-"):
@@ -47,7 +50,7 @@ func ValidateRequest(canonical Family, request string) error {
 	}
 	namespace := Family(prefix)
 	switch namespace {
-	case OpenAI, Anthropic, Gemini, ZAI:
+	case OpenAI, Anthropic, Gemini, ZAI, DeepSeek:
 		if err := compareKnown(namespace, suffix); err != nil {
 			return err
 		}
@@ -88,6 +91,8 @@ func Map(f Family, level genai.ThinkingLevel) (Reasoning, error) {
 		return Reasoning{}, nil
 	}
 	switch f {
+	case DeepSeek:
+		return Reasoning{}, fmt.Errorf("DeepSeek currently supports only provider-default thinking")
 	case OpenAI:
 		return Reasoning{Effort: openAI(level)}, nil
 	case Anthropic:

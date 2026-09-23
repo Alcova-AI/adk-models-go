@@ -450,3 +450,41 @@ type timeoutBody struct {
 
 func (b *timeoutBody) Read([]byte) (int, error) { <-b.ctx.Done(); return 0, b.ctx.Err() }
 func (b *timeoutBody) Close() error             { b.closed = true; return nil }
+
+func TestDeepSeekNativeProviderDefaultWire(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			var body map[string]any
+			client := &http.Client{Transport: wireTransport(func(r *http.Request) (*http.Response, error) {
+				if r.Header.Get("ai-language-model-id") != "deepseek/deepseek-v4.1-flash" {
+					t.Errorf("wrong model header: %s", r.Header.Get("ai-language-model-id"))
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					return nil, err
+				}
+				return wireResponse(r, "vercel", stream), nil
+			})}
+			cfg := adkmodels.ModelConfig{CanonicalModel: "deepseek-v4.1-flash", RequestModel: "deepseek/deepseek-v4.1-flash", Reasoning: adkmodels.ReasoningConfig{DefaultLevel: genai.ThinkingLevelUnspecified}, Vercel: &adkmodels.VercelConfig{Only: []string{"deepinfra"}, ZeroDataRetention: true, DisallowPromptTraining: true}}
+			llm, err := wireModel("vercel", client, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, err := range llm.GenerateContent(t.Context(), &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hello", genai.RoleUser)}}, stream) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if body == nil {
+				t.Fatal("no request")
+			}
+			providers := body["providerOptions"].(map[string]any)
+			gateway := providers["gateway"].(map[string]any)
+			if !reflect.DeepEqual(gateway["only"], []any{"deepinfra"}) || gateway["zeroDataRetention"] != true || gateway["disallowPromptTraining"] != true {
+				t.Fatalf("wrong routing: %v", gateway)
+			}
+			if body["reasoning"] != nil || providers["deepseek"] != nil {
+				t.Fatalf("unexpected reasoning override: %v", body)
+			}
+		})
+	}
+}

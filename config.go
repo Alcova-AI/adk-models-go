@@ -42,6 +42,11 @@ func (c ModelConfig) Validate() error {
 			return err
 		}
 	}
+	if f == family.DeepSeek {
+		if _, err := family.Map(f, c.Reasoning.DefaultLevel); err != nil {
+			return err
+		}
+	}
 	if c.DefaultMaxOutputTokens < 0 {
 		return fmt.Errorf("default max output tokens must not be negative")
 	}
