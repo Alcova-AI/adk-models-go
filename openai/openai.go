@@ -55,6 +55,14 @@ type openAIModel struct {
 // The adapter does not discover credentials, select endpoints, or infer gateway
 // capabilities from model names.
 func NewModel(cfg Config) (model.LLM, error) {
+	switch cfg.API {
+	case "", APIResponses:
+	case APIChatCompletions:
+		return newChatModel(cfg)
+	default:
+		return nil, fmt.Errorf("unsupported OpenAI API %q", cfg.API)
+	}
+
 	if len(cfg.Client.Options) == 0 {
 		return nil, fmt.Errorf("client must be constructed with openai.NewClient")
 	}

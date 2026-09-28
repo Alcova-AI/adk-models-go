@@ -13,7 +13,7 @@ Each adapter implements ADK's `model.LLM` interface. Choose the request format e
 | Package | Request format | Client |
 |---|---|---|
 | `anthropic` | Anthropic Messages | Caller-supplied Anthropic SDK client |
-| `openai` | OpenAI Responses | Caller-supplied OpenAI SDK client |
+| `openai` | OpenAI Responses (default) or Chat Completions | Caller-supplied OpenAI SDK client |
 | `vercel` | Native Vercel | Optional HTTP client |
 
 Direct Anthropic and OpenAI adapters require their own model family. Cross-family requests require Vercel. Direct Gemini stays on Google ADK's existing Gemini adapter; Gemini through Vercel uses this library.
@@ -50,7 +50,57 @@ llm, err := adkopenai.NewModel(adkopenai.Config{
 })
 ```
 
-The OpenAI adapter always sends `store: false`. ADK owns conversation history, including the opaque reasoning state needed for later turns.
+The OpenAI adapter always sends `store: false`. ADK owns conversation history.
+Responses preserves opaque reasoning state needed for later turns.
+
+### Chat Completions
+
+Set `API: adkopenai.APIChatCompletions` in `adkopenai.Config` to use
+`/chat/completions`. Omit `API`, or use `adkopenai.APIResponses`, to retain
+Responses. Unknown API values return an error. Authentication and endpoint
+selection remain on the caller-supplied SDK client.
+
+```go
+llm, err := adkopenai.NewModel(adkopenai.Config{
+    Client: client,
+    API: adkopenai.APIChatCompletions,
+    Model: adkmodels.ModelConfig{
+        CanonicalModel: "gpt-6-luna",
+        Reasoning: adkmodels.ReasoningConfig{
+            DefaultLevel: genai.ThinkingLevelMinimal, // OpenAI effort "none".
+        },
+    },
+})
+```
+
+For Vercel, supply a client with base URL `https://ai-gateway.vercel.sh/v1`,
+set the qualified `RequestModel`, and supply the existing `Model.Vercel`
+configuration. Gateway routing, retention and provider reasoning options are
+preserved. Direct OpenAI model restrictions are not imposed on the gateway.
+
+Chat Completions supports streamed and non-streamed text, function calls and
+text tool results, tool selection, JSON/schema output, user images, inline
+files and uploaded non-image file IDs. It returns final accumulated responses,
+standard token usage and response/gateway metadata. Provider support for
+individual media types and settings remains endpoint-dependent.
+
+Unsupported settings fail locally: reasoning summaries or history, reasoning
+context/mode controls, explicit cache modes/breakpoints, log probabilities,
+multiple candidates, top-K, labels and safety settings. Cache keys are
+supported for OpenAI models. Tool-result media, file URLs and image file IDs
+are rejected. No API fallback or automatic reasoning downgrade occurs.
+
+Direct GPT-6 Luna/Sol tool calls require explicit effort `none` (ADK `MINIMAL`);
+GPT-6 Astra tool calls require Responses. Disabled tools do not trigger these
+restrictions. Known dated variants follow the same rule; unknown models are
+left to the provider.
+
+Opt-in synthetic live checks run with `ADK_CHAT_LIVE=1 go test ./openai -run
+'^TestChatLiveMatrix$' -count=1 -v`. They require `OPENAI_API_KEY` and
+`AI_GATEWAY_API_KEY`; select one route with `ADK_CHAT_LIVE_ROUTE=direct`,
+`vercel-openai` or `vercel-google`. The suite disables retries and reserves a
+conservative maximum of USD 0.10 per run at its documented fixture rates.
+
 
 ## Direct Anthropic
 
@@ -89,7 +139,7 @@ llm, err := adkvercel.NewModel(adkvercel.Config{
 
 Native Vercel accepts optional `BaseURL`, `HTTPClient` and `Headers` settings. If no HTTP client is supplied, it creates a dedicated client with two retries for connection failures and HTTP 408, 409, 429 and 5xx responses. It respects `x-should-retry` and `Retry-After` (up to 60 seconds), otherwise using exponential backoff with jitter. Cancellation stops retries. Supplied clients are used unchanged. Errors after a successful response starts streaming are returned without retry.
 
-Anthropic Messages and OpenAI Responses can also be used through Vercel-compatible endpoints. Configure their endpoint through the supplied SDK client and their gateway behaviour through `ModelConfig.Vercel`.
+Anthropic Messages, OpenAI Responses and OpenAI Chat Completions can also be used through Vercel-compatible endpoints. Configure their endpoint through the supplied SDK client and their gateway behaviour through `ModelConfig.Vercel`.
 
 ## Model names
 
@@ -139,7 +189,7 @@ Z.ai thinking remains enabled for explicit levels. If no level is supplied or co
 
 Gemini levels keep their GenAI meaning; Vercel provider options encode them in lowercase (`HIGH` becomes `high`).
 
-The library does not maintain model-specific exceptions. If a model or endpoint rejects a mapped setting, its error is returned without retrying at a different level.
+Apart from the direct Chat Completions tool restrictions above, the library leaves model-specific reasoning support to the endpoint. Provider errors are returned without retrying at a different level.
 
 When Anthropic tool use is forced, the adapter preserves its existing exception: omit thinking and clear adaptive effort. This applies to Messages fields and gateway provider options without changing the caller's configuration.
 
@@ -162,7 +212,7 @@ Caching controls are unset by default. Provider-managed caching may still occur.
 When explicitly configured:
 
 - Anthropic retains its cache lifetimes and distinct cache boundaries.
-- OpenAI retains its cache modes, keys and boundary rules.
+- OpenAI Responses retains its cache modes, keys and boundary rules. Chat Completions supports keys only.
 - Gateway-managed caching is configured through `VercelConfig`.
 - Unsupported optional features, such as cache breakpoints, are ignored.
 
