@@ -103,21 +103,24 @@ func TestChatWireAndToolRoundTrip(t *testing.T) {
 					if stream {
 						w.Header().Set("Content-Type", "text/event-stream")
 						if count == 1 {
-							fmt.Fprint(w, "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"id\\\":\"}}]}}]}\n\n")
-							fmt.Fprint(w, "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"42\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n")
+							fmt.Fprint(w, "data: {\"id\":\"c1\",\"model\":\"returned-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"id\\\":\"}}]}}]}\n\n")
+							fmt.Fprint(w, "data: {\"id\":\"c1\",\"model\":\"returned-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"42\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n")
 						} else {
-							fmt.Fprint(w, "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Found 42\"},\"finish_reason\":\"stop\"}]}\n\n")
+							fmt.Fprint(w, "data: {\"id\":\"c1\",\"model\":\"returned-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Found 42\"},\"finish_reason\":\"stop\"}]}\n\n")
 						}
-						fmt.Fprint(w, "data: {\"id\":\"c1\",\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\ndata: [DONE]\n\n")
+						fmt.Fprint(w, "data: {\"id\":\"c1\",\"model\":\"returned-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\ndata: [DONE]\n\n")
 					} else if count == 1 {
-						fmt.Fprint(w, `{"id":"c1","choices":[{"index":0,"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"id\":\"42\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
+						fmt.Fprint(w, `{"id":"c1","model":"returned-model","choices":[{"index":0,"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"id\":\"42\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
 					} else {
-						fmt.Fprint(w, `{"id":"c1","choices":[{"index":0,"message":{"content":"Found 42"},"finish_reason":"stop"}]}`)
+						fmt.Fprint(w, `{"id":"c1","model":"returned-model","choices":[{"index":0,"message":{"content":"Found 42"},"finish_reason":"stop"}]}`)
 					}
 				}, v)
 				req := chatTestRequest()
 				req.Config.Tools = chatTestTools()
 				first := chatCollect(t, llm, req, stream)
+				if first.ModelVersion != "returned-model" {
+					t.Fatalf("lost model version: %q", first.ModelVersion)
+				}
 				call := first.Content.Parts[0].FunctionCall
 				if call == nil || call.ID != "call_1" || call.Args["id"] != "42" {
 					t.Fatalf("bad tool call: %+v", first)
@@ -127,6 +130,9 @@ func TestChatWireAndToolRoundTrip(t *testing.T) {
 				}
 				req.Contents = append(req.Contents, first.Content, &genai.Content{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{ID: call.ID, Name: call.Name, Response: map[string]any{"value": "42"}}}}})
 				second := chatCollect(t, llm, req, stream)
+				if second.ModelVersion != "returned-model" {
+					t.Fatalf("lost model version: %q", second.ModelVersion)
+				}
 				if second.Content.Parts[0].Text != "Found 42" {
 					t.Fatal("bad final text")
 				}
@@ -185,7 +191,7 @@ func TestChatModelRestrictions(t *testing.T) {
 	}
 }
 func TestChatStreamFailure(t *testing.T) {
-	for _, body := range []string{"data: {broken}\n\n", "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n"} {
+	for _, body := range []string{"data: {broken}\n\n", "data: {\"id\":\"c1\",\"model\":\"returned-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n"} {
 		llm := chatTestModel(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, body)
@@ -261,5 +267,49 @@ func TestChatToolChoiceAndSchema(t *testing.T) {
 	req.Config.ResponseJsonSchema = map[string]any{"type": "object", "properties": map[string]any{"ok": map[string]any{"type": "boolean"}}, "required": []string{"ok"}, "additionalProperties": false}
 	if !strings.Contains(chatCollect(t, llm, req, false).Content.Parts[0].Text, "true") {
 		t.Fatal("missing text")
+	}
+}
+
+func TestChatRestrictionsUseRequestModel(t *testing.T) {
+	for _, tc := range []struct {
+		canonical, wire string
+		level           genai.ThinkingLevel
+		vercel          bool
+		blocked         bool
+	}{
+		{"gpt-6-luna", "gpt-6-astra", genai.ThinkingLevelMinimal, false, true},
+		{"gpt-6-luna", " OpenAI/GPT-6-ASTRA-2026-09-01 ", genai.ThinkingLevelMinimal, false, true},
+		{"gpt-4.1", "GPT-6-LUNA", genai.ThinkingLevelHigh, false, true},
+		{"gpt-6-astra", "gpt-6-luna", genai.ThinkingLevelMinimal, false, false},
+		{"gpt-6-luna", "openai/gpt-6-astra", genai.ThinkingLevelHigh, true, false},
+	} {
+		t.Run(tc.wire, func(t *testing.T) {
+			calls := 0
+			client := sdk.NewClient(option.WithAPIKey("test"), option.WithMaxRetries(0), option.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("request reached transport")
+			})}))
+			cfg := Config{API: APIChatCompletions, Client: client, Model: adkmodels.ModelConfig{CanonicalModel: tc.canonical, RequestModel: tc.wire, Reasoning: adkmodels.ReasoningConfig{DefaultLevel: tc.level}}}
+			if tc.vercel {
+				cfg.Model.Vercel = &adkmodels.VercelConfig{}
+			}
+			llm, err := NewModel(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := chatTestRequest()
+			req.Config.Tools = chatTestTools()
+			for _, err = range llm.GenerateContent(t.Context(), req, false) {
+			}
+			if err == nil {
+				t.Fatal("expected validation or transport error")
+			}
+			if tc.blocked && calls != 0 {
+				t.Fatal("restricted model reached transport")
+			}
+			if !tc.blocked && calls != 1 {
+				t.Fatalf("valid route blocked: %v", err)
+			}
+		})
 	}
 }

@@ -286,5 +286,5 @@ func ChatToLLMResponse(reply *sdk.ChatCompletion) (*model.LLMResponse, error) {
 		finish = genai.FinishReasonSafety
 	}
 	u := reply.Usage
-	return &model.LLMResponse{Content: content, TurnComplete: true, FinishReason: finish, UsageMetadata: &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: safeInt32(u.PromptTokens), CandidatesTokenCount: safeInt32(u.CompletionTokens), TotalTokenCount: safeInt32(u.TotalTokens), CachedContentTokenCount: safeInt32(u.PromptTokensDetails.CachedTokens), ThoughtsTokenCount: safeInt32(u.CompletionTokensDetails.ReasoningTokens)}}, nil
+	return &model.LLMResponse{Content: content, ModelVersion: reply.Model, TurnComplete: true, FinishReason: finish, UsageMetadata: &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: safeInt32(u.PromptTokens), CandidatesTokenCount: safeInt32(u.CompletionTokens), TotalTokenCount: safeInt32(u.TotalTokens), CachedContentTokenCount: safeInt32(u.PromptTokensDetails.CachedTokens), ThoughtsTokenCount: safeInt32(u.CompletionTokensDetails.ReasoningTokens)}}, nil
 }

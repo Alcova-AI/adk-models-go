@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"regexp"
+	"strings"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal"
@@ -126,7 +127,7 @@ func (m *chatModel) generate(ctx context.Context, req *model.LLMRequest, stream 
 			return singleErrorSequence(err)
 		}
 		params.ReasoningEffort = shared.ReasoningEffort(mapped.Effort)
-		if err := validateChatToolReasoning(m.name, mapped.Effort, len(params.Tools) > 0 && params.ToolChoice.OfAuto.Value != "none"); err != nil {
+		if err := validateChatToolReasoning(m.requestModel, mapped.Effort, len(params.Tools) > 0 && params.ToolChoice.OfAuto.Value != "none"); err != nil {
 			return singleErrorSequence(err)
 		}
 	}
@@ -157,6 +158,8 @@ func validateChatToolReasoning(name, effort string, toolsEnabled bool) error {
 	if !toolsEnabled {
 		return nil
 	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.TrimPrefix(name, "openai/")
 	match := chatRestrictedModel.FindStringSubmatch(name)
 	if match == nil {
 		return nil
