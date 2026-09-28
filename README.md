@@ -31,8 +31,7 @@
 | Feature | Description |
 |---------|-------------|
 | [**Direct Anthropic**](#direct-anthropic) | Claude through the Anthropic Messages API, with your SDK client |
-| [**Direct OpenAI**](#direct-openai) | GPT and o-series through Responses or Chat Completions, with your SDK client |
-| [**Chat Completions**](#chat-completions) | Text, tools and supported media through OpenAI-compatible endpoints |
+| [**OpenAI**](#openai) | GPT and o-series through Responses or Chat Completions, with your SDK client |
 | [**Vercel AI Gateway**](#vercel-ai-gateway) | Any supported model family through Vercel's native protocol |
 | [**Reasoning levels**](#reasoning-levels) | One thinking scale mapped to each model family |
 | [**Prompt caching**](#prompt-caching) | Anthropic breakpoints, OpenAI cache modes and gateway-managed caching |
@@ -81,9 +80,9 @@ llm, err := adkanthropic.NewModel(adkanthropic.Config{
 })
 ```
 
-### Direct OpenAI
+### OpenAI
 
-Use OpenAI models through the Responses API by default. For Chat Completions, set `API: adkopenai.APIChatCompletions`; see [supported features and limits](#chat-completions).
+Use one SDK client for either API. The client owns authentication, endpoint selection and HTTP settings.
 
 ```go
 import (
@@ -96,6 +95,13 @@ import (
 
 client := openaisdk.NewClient(option.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
 
+```
+
+#### Responses (default)
+
+Omit `API`, or set `API: adkopenai.APIResponses`.
+
+```go
 llm, err := adkopenai.NewModel(adkopenai.Config{
     Client: client,
     Model:  adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna"},
@@ -103,6 +109,44 @@ llm, err := adkopenai.NewModel(adkopenai.Config{
 ```
 
 The OpenAI adapter sends `store: false`. ADK owns the conversation history. Responses preserves opaque reasoning state needed for later turns; Chat Completions rejects reasoning history.
+
+#### Chat Completions
+
+Set `API: adkopenai.APIChatCompletions` on the OpenAI adapter. Omit `API`, or use
+`adkopenai.APIResponses`, for Responses. Unknown API values return an error.
+The SDK client still owns authentication and endpoint selection.
+
+```go
+llm, err := adkopenai.NewModel(adkopenai.Config{
+    Client: client,
+    API:    adkopenai.APIChatCompletions,
+    Model: adkmodels.ModelConfig{
+        CanonicalModel: "gpt-6-luna",
+        Reasoning: adkmodels.ReasoningConfig{
+            DefaultLevel: genai.ThinkingLevelMinimal, // OpenAI effort "none".
+        },
+    },
+})
+```
+
+- Supports streamed and non-streamed text, function calls, text tool results,
+  tool selection, JSON/schema output, user images, inline files and uploaded
+  non-image file IDs. Final responses include token usage and response metadata.
+  Individual features still depend on the endpoint.
+- Rejects reasoning summaries and history, reasoning context/mode controls,
+  explicit cache modes/breakpoints, log probabilities, multiple candidates,
+  top-K, labels and safety settings. OpenAI models support cache keys only.
+- Rejects media in tool results, file URLs and image file IDs.
+- Direct GPT-6 Luna/Sol tool calls require `MINIMAL` (effort `none`). Direct
+  GPT-6 Astra tool calls require Responses. These checks cover known dated
+  variants and do not apply when tools are disabled or the route uses Vercel.
+  Other model restrictions are left to the endpoint.
+
+The [opt-in live test matrix](openai/chat_live_test.go) covers direct OpenAI and
+Vercel. Run `ADK_CHAT_LIVE=1 go test ./openai -run '^TestChatLiveMatrix$' -count=1 -v`
+with the required `OPENAI_API_KEY` and/or `AI_GATEWAY_API_KEY`. Select a route with
+`ADK_CHAT_LIVE_ROUTE=direct`, `vercel-openai` or `vercel-google`. The suite disables
+retries and reserves at most USD 0.10 per run at its documented fixture rates.
 
 ### Vercel AI Gateway
 
@@ -169,50 +213,6 @@ A recognised model family does not guarantee that an endpoint supports that mode
 
 ---
 
-## Chat Completions
-
-Set `API: adkopenai.APIChatCompletions` on the OpenAI adapter. Omit `API`, or use
-`adkopenai.APIResponses`, for Responses. Unknown API values return an error.
-The SDK client still owns authentication and endpoint selection.
-
-```go
-llm, err := adkopenai.NewModel(adkopenai.Config{
-    Client: client,
-    API:    adkopenai.APIChatCompletions,
-    Model: adkmodels.ModelConfig{
-        CanonicalModel: "gpt-6-luna",
-        Reasoning: adkmodels.ReasoningConfig{
-            DefaultLevel: genai.ThinkingLevelMinimal, // OpenAI effort "none".
-        },
-    },
-})
-```
-
-For Vercel, set the SDK client's base URL to `https://ai-gateway.vercel.sh/v1`,
-use a qualified `RequestModel`, and supply `ModelConfig.Vercel`. Gateway routing,
-retention and provider reasoning options remain available.
-
-- Supports streamed and non-streamed text, function calls, text tool results,
-  tool selection, JSON/schema output, user images, inline files and uploaded
-  non-image file IDs. Final responses include token usage and response metadata.
-  Individual features still depend on the endpoint.
-- Rejects reasoning summaries and history, reasoning context/mode controls,
-  explicit cache modes/breakpoints, log probabilities, multiple candidates,
-  top-K, labels and safety settings. OpenAI models support cache keys only.
-- Rejects media in tool results, file URLs and image file IDs.
-- Direct GPT-6 Luna/Sol tool calls require `MINIMAL` (effort `none`). Direct
-  GPT-6 Astra tool calls require Responses. These checks cover known dated
-  variants and do not apply when tools are disabled or the route uses Vercel.
-  Other model restrictions are left to the endpoint.
-
-The [opt-in live test matrix](openai/chat_live_test.go) covers direct OpenAI and
-Vercel. Run `ADK_CHAT_LIVE=1 go test ./openai -run '^TestChatLiveMatrix$' -count=1 -v`
-with the required `OPENAI_API_KEY` and/or `AI_GATEWAY_API_KEY`. Select a route with
-`ADK_CHAT_LIVE_ROUTE=direct`, `vercel-openai` or `vercel-google`. The suite disables
-retries and reserves at most USD 0.10 per run at its documented fixture rates.
-
----
-
 ## Reasoning levels
 
 Set reasoning through ADK's `genai.ThinkingConfig`:
@@ -254,6 +254,10 @@ The same mapping applies across all adapters.
 ## Vercel configuration
 
 Put all Vercel-specific behaviour in `VercelConfig` and supply it through `ModelConfig.Vercel`. This covers gateway routing, data retention, gateway-managed caching and gateway provider options.
+
+For Chat Completions through Vercel, set the OpenAI SDK client's base URL to `https://ai-gateway.vercel.sh/v1`,
+use a qualified `RequestModel`, and supply `ModelConfig.Vercel`. Gateway routing,
+retention and provider reasoning options remain available.
 
 - Retention is allowed by default. Set `ZeroDataRetention: true` to require zero data retention.
 - The library sends that requirement to Vercel and returns any gateway error. It never weakens the requirement and keeps no local list of which providers support it.
