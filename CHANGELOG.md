@@ -1,12 +1,18 @@
 # Changelog
 
-## [v0.1.6] - Compatible models across adapters
+## [v0.1.7] - Compatible models across adapters
 
 ### Added
 
 - Accept unmapped model names through Anthropic Messages, OpenAI Responses, Chat Completions and native Vercel with provider-default reasoning and validated tool schemas, without assigning a known family or enabling strict decoding.
 - Reject explicit reasoning levels and typed cache controls for unmapped models. Preserve known-family identity checks and reasoning mappings.
 - Use `max_tokens` for unmapped Chat Completions models and omit OpenAI-specific storage and encrypted-reasoning request controls for unmapped OpenAI-protocol models.
+
+## [v0.1.6] - README landing page
+
+### Changed
+
+- Introduce the module with a feature overview and adapter quick starts, followed by the reference guide. Retain Chat Completions settings and limits and the existing migration anchor.
 
 ## [v0.1.5] - Chat Completions
 
