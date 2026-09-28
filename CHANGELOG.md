@@ -1,6 +1,6 @@
 # Changelog
 
-## [v0.1.5] - Chat Completions (next release)
+## [v0.1.5] - Chat Completions
 
 ### Added
 
