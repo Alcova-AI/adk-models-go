@@ -155,7 +155,7 @@ Anthropic Messages, OpenAI Responses and OpenAI Chat Completions can also be use
 | Gemini | `gemini-*` |
 | Z.ai | `glm-*` |
 
-Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Unrecognised canonical names are rejected. There is no family override.
+Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Unrecognised canonical names are accepted only by Chat Completions, using provider defaults as described below. Other adapters reject them. There is no family override.
 
 For request names, recognised family mismatches are rejected. Unknown endpoint aliases are accepted without a family cross-check. An explicitly supplied request name is not rewritten.
 
@@ -340,3 +340,17 @@ tool execution does not count towards the model timeout.
 Use `errors.Is(err, context.DeadlineExceeded)` to recognise a timeout. Check the
 caller context to distinguish its deadline from a request timeout. Caller
 cancellation remains `context.Canceled`.
+
+### Other Chat Completions endpoints
+
+`openai.APIChatCompletions` also accepts unqualified canonical names without a
+known family mapping, such as `gemma-4-31B-it`. Configure the endpoint and API key
+on the caller-owned OpenAI client. No provider-specific configuration field is
+needed. `RequestModel` remains the exact identifier sent to the endpoint.
+
+For these models, leave reasoning levels unset. Explicit levels and reasoning
+output are rejected. The adapter uses `max_tokens`, omits OpenAI's `store`
+control, and preserves validated tool-schema constraints without enabling strict
+decoding or claiming provider compatibility. Applications must validate tool
+arguments. Endpoint support for individual features still requires verification.
+Responses and the other adapters retain their existing model validation.

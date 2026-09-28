@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.1.6] - Compatible Chat Completions models
+
+### Added
+
+- Accept unmapped model names on Chat Completions routes with provider-default reasoning and validated tool schemas, without assigning a known family or enabling strict decoding.
+- Use `max_tokens` and omit OpenAI-specific storage controls for these models. Responses and native adapter validation are unchanged.
+
 ## [v0.1.5] - Chat Completions
 
 ### Added

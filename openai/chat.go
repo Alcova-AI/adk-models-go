@@ -38,14 +38,14 @@ func newChatModel(cfg Config) (model.LLM, error) {
 	if len(cfg.Client.Options) == 0 {
 		return nil, fmt.Errorf("client must be constructed with openai.NewClient")
 	}
-	if err := cfg.Model.Validate(); err != nil {
+	if err := cfg.Model.ValidateChat(); err != nil {
 		return nil, err
 	}
-	f, err := family.Detect(cfg.Model.CanonicalModel)
+	f, err := family.DetectChat(cfg.Model.CanonicalModel)
 	if err != nil {
 		return nil, err
 	}
-	if f != family.OpenAI && cfg.Model.Vercel == nil {
+	if f != family.OpenAI && f != family.Compatible && cfg.Model.Vercel == nil {
 		return nil, fmt.Errorf("direct openai chat adapter requires its own model family; cross-family requests require Vercel")
 	}
 	if cfg.Model.Reasoning.OpenAI != (adkmodels.OpenAIReasoningConfig{}) {
@@ -113,6 +113,16 @@ func (m *chatModel) generate(ctx context.Context, req *model.LLMRequest, stream 
 	if resolved.IncludeThoughts {
 		return singleErrorSequence(fmt.Errorf("openai chat: reasoning output is unsupported; use Responses"))
 	}
+	// Unmapped compatible endpoints use the original Chat Completions token field.
+	// Do not send OpenAI-specific storage or reasoning controls.
+	if m.reasoning.Family == family.Compatible {
+		if resolved.ThinkingLevel != "" && resolved.ThinkingLevel != genai.ThinkingLevelUnspecified {
+			return singleErrorSequence(fmt.Errorf("unmapped chat models require provider-default reasoning"))
+		}
+		params.MaxTokens = params.MaxCompletionTokens
+		params.MaxCompletionTokens = param.Opt[int64]{}
+		params.Store = param.Opt[bool]{}
+	}
 	var options []option.RequestOption
 	if m.vercel != nil {
 		values, err := gateway.Options(*m.vercel, m.reasoning.Family, resolved.ThinkingLevel, false, adkmodels.OpenAIReasoningConfig{})
@@ -121,7 +131,7 @@ func (m *chatModel) generate(ctx context.Context, req *model.LLMRequest, stream 
 		}
 		gateway.ForcedTools(values, req.Config)
 		options = append(options, option.WithJSONSet("providerOptions", values))
-	} else {
+	} else if m.reasoning.Family != family.Compatible {
 		mapped, err := family.Map(family.OpenAI, resolved.ThinkingLevel)
 		if err != nil {
 			return singleErrorSequence(err)

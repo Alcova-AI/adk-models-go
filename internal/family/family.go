@@ -14,12 +14,13 @@ import (
 type Family string
 
 const (
-	OpenAI    Family              = "openai"
-	Anthropic Family              = "anthropic"
-	Gemini    Family              = "google"
-	ZAI       Family              = "zai"
-	XHigh     genai.ThinkingLevel = "XHIGH"
-	Max       genai.ThinkingLevel = "MAX"
+	Compatible Family              = "compatible"
+	OpenAI     Family              = "openai"
+	Anthropic  Family              = "anthropic"
+	Gemini     Family              = "google"
+	ZAI        Family              = "zai"
+	XHigh      genai.ThinkingLevel = "XHIGH"
+	Max        genai.ThinkingLevel = "MAX"
 )
 
 func Detect(name string) (Family, error) {
@@ -36,6 +37,18 @@ func Detect(name string) (Family, error) {
 	default:
 		return "", fmt.Errorf("unrecognised canonical model %q", name)
 	}
+}
+
+// DetectChat accepts unqualified model names without inventing a family mapping.
+func DetectChat(name string) (Family, error) {
+	if f, err := Detect(name); err == nil {
+		return f, nil
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || strings.ContainsAny(name, "/ \t\r\n") {
+		return "", fmt.Errorf("canonical model must be a nonempty unqualified name")
+	}
+	return Compatible, nil
 }
 
 // ValidateRequest checks recognised identities without rewriting endpoint aliases.

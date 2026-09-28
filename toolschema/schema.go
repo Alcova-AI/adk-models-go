@@ -23,7 +23,8 @@ import (
 )
 
 // Target identifies the receiving format and provider, not just the model name.
-// Provider is openai, anthropic or google. Route is direct, vertex,
+// Provider is openai, anthropic, google, or compatible (unmapped chat models).
+// Route is chat, vercel-openai-chat, direct, vertex,
 // vercel-native, vercel-openai or vercel-anthropic.
 type Target struct{ Provider, Route string }
 
