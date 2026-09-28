@@ -38,10 +38,10 @@ func newChatModel(cfg Config) (model.LLM, error) {
 	if len(cfg.Client.Options) == 0 {
 		return nil, fmt.Errorf("client must be constructed with openai.NewClient")
 	}
-	if err := cfg.Model.ValidateChat(); err != nil {
+	if err := cfg.Model.Validate(); err != nil {
 		return nil, err
 	}
-	f, err := family.DetectChat(cfg.Model.CanonicalModel)
+	f, err := family.Detect(cfg.Model.CanonicalModel)
 	if err != nil {
 		return nil, err
 	}

@@ -155,7 +155,7 @@ Anthropic Messages, OpenAI Responses and OpenAI Chat Completions can also be use
 | Gemini | `gemini-*` |
 | Z.ai | `glm-*` |
 
-Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Unrecognised canonical names are accepted only by Chat Completions, using provider defaults as described below. Other adapters reject them. There is no family override.
+Family detection ignores case and surrounding spaces. Canonical names must be unqualified; gateway prefixes belong in `RequestModel`. Unrecognised canonical names are accepted across all adapters, using provider defaults as described below. There is no family override.
 
 For request names, recognised family mismatches are rejected. Unknown endpoint aliases are accepted without a family cross-check. An explicitly supplied request name is not rewritten.
 
@@ -341,16 +341,32 @@ Use `errors.Is(err, context.DeadlineExceeded)` to recognise a timeout. Check the
 caller context to distinguish its deadline from a request timeout. Caller
 cancellation remains `context.Canceled`.
 
-### Other Chat Completions endpoints
+### Models without a family mapping
 
-`openai.APIChatCompletions` also accepts unqualified canonical names without a
-known family mapping, such as `gemma-4-31B-it`. Configure the endpoint and API key
-on the caller-owned OpenAI client. No provider-specific configuration field is
-needed. `RequestModel` remains the exact identifier sent to the endpoint.
+All adapters accept unqualified canonical names without a known family mapping,
+such as `gemma-4-31B-it` or `mimo-v2.6-pro`. Configure the correct protocol,
+endpoint and credentials on the selected adapter. `RequestModel` remains the
+exact endpoint identifier, including any gateway namespace. No provider-specific
+configuration field or family override is needed.
 
-For these models, leave reasoning levels unset. Explicit levels and reasoning
-output are rejected. The adapter uses `max_tokens`, omits OpenAI's `store`
-control, and preserves validated tool-schema constraints without enabling strict
-decoding or claiming provider compatibility. Applications must validate tool
-arguments. Endpoint support for individual features still requires verification.
-Responses and the other adapters retain their existing model validation.
+For these models, leave reasoning levels and typed prompt-cache controls unset.
+Explicit levels, OpenAI reasoning controls and typed cache settings are rejected
+rather than mapped to another family or silently ignored. Gateway routing and
+provider options continue to use `ModelConfig.Vercel`. Known-family identity
+checks and reasoning mappings remain in place.
+
+Tool schemas retain their validated constraints without enabling strict decoding
+or claiming a verified provider profile. Applications must validate tool
+arguments. Each adapter reuses its protocol's streaming, tool-call and history
+handling; accepting a model name does not verify that its endpoint supports that
+protocol or every feature. Chat Completions still rejects reasoning output and
+reasoning history. Anthropic, Responses and native Vercel retain their existing
+protocol-specific reasoning-history support.
+
+Unmapped Chat Completions models use `max_tokens`. Unmapped Chat Completions and
+Responses models omit OpenAI-specific storage and encrypted-reasoning request
+controls. Provider data-retention guarantees must be established independently.
+
+The opt-in MiMo test from PR #8 remains available with `ADK_MIMO_LIVE=1 go test
+-count=1 -v . -run '^TestMiMoGatewayLive$'` and `AI_GATEWAY_API_KEY`. It exercises
+native Vercel tool calls in both modes; it does not verify other protocols.

@@ -115,8 +115,8 @@ func TestCompatibleChatValidation(t *testing.T) {
 			t.Fatal("invalid config accepted")
 		}
 	}
-	if _, err := NewModel(Config{Client: client, Model: base}); err == nil {
-		t.Fatal("Responses accepted unmapped model")
+	if _, err := NewModel(Config{Client: client, Model: base}); err != nil {
+		t.Fatalf("Responses rejected unmapped model: %v", err)
 	}
 	llm, err := NewModel(Config{API: APIChatCompletions, Client: client, Model: base})
 	if err != nil {

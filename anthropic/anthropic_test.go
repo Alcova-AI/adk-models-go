@@ -38,7 +38,7 @@ func TestNewModel_RequiresConstructedClientAndCanonicalModel(t *testing.T) {
 		want string
 	}{
 		{name: "missing client", cfg: testConfig{CanonicalModel: "claude-sonnet-5"}, want: "client must be constructed"},
-		{name: "missing model", cfg: testConfig{Client: testClient()}, want: "unrecognised canonical model"},
+		{name: "missing model", cfg: testConfig{Client: testClient()}, want: "canonical model must be a nonempty unqualified name"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

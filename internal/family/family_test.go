@@ -46,14 +46,14 @@ func TestNames(t *testing.T) {
 		name string
 		want Family
 	}{
-		{"  GPT-5.6-luna  ", OpenAI}, {"o1", OpenAI}, {"o1-mini", OpenAI}, {"o3", OpenAI}, {"o3-pro", OpenAI}, {"o4", OpenAI}, {"o4-mini", OpenAI}, {"claude-opus-4-7", Anthropic}, {"Gemini-3-pro", Gemini}, {"GLM-5.3", ZAI},
+		{"custom", Compatible}, {"o5", Compatible}, {"o11", Compatible}, {"gemma-4-31B-it", Compatible}, {"  GPT-5.6-luna  ", OpenAI}, {"o1", OpenAI}, {"o1-mini", OpenAI}, {"o3", OpenAI}, {"o3-pro", OpenAI}, {"o4", OpenAI}, {"o4-mini", OpenAI}, {"claude-opus-4-7", Anthropic}, {"Gemini-3-pro", Gemini}, {"GLM-5.3", ZAI},
 	} {
 		got, err := Detect(tt.name)
 		if err != nil || got != tt.want {
 			t.Errorf("%q: %q %v", tt.name, got, err)
 		}
 	}
-	for _, name := range []string{"", "custom", "openai/gpt-5.6-luna", "o5", "o11"} {
+	for _, name := range []string{"", "openai/gpt-5.6-luna", "two names"} {
 		if _, err := Detect(name); err == nil {
 			t.Errorf("accepted %q", name)
 		}
@@ -66,6 +66,19 @@ func TestNames(t *testing.T) {
 	} {
 		if err := ValidateRequest(OpenAI, tt.name); (err != nil) != tt.bad {
 			t.Errorf("%q: %v", tt.name, err)
+		}
+	}
+}
+
+func TestUnmappedRequestNamespaces(t *testing.T) {
+	for _, name := range []string{"google/gemma-4-31B-it", "openai/custom-deployment", "anthropic/custom-model", "xiaomi/mimo-v2.6-pro"} {
+		if err := ValidateRequest(Compatible, name); err != nil {
+			t.Fatalf("rejected %q: %v", name, err)
+		}
+	}
+	for _, name := range []string{"google/gemini-test", "openai/gpt-test", "anthropic/claude-test", "gpt-test"} {
+		if err := ValidateRequest(Compatible, name); err == nil {
+			t.Fatalf("accepted family mismatch %q", name)
 		}
 	}
 }

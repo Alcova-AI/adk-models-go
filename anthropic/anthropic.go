@@ -84,7 +84,7 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if err != nil {
 		return nil, err
 	}
-	if f != family.Anthropic && cfg.Model.Vercel == nil {
+	if f != family.Anthropic && f != family.Compatible && cfg.Model.Vercel == nil {
 		return nil, fmt.Errorf("direct anthropic adapter requires its own model family; cross-family requests require Vercel")
 	}
 	cache := cfg.Model.PromptCaching.Anthropic

@@ -37,23 +37,17 @@ func (c ModelConfig) Validate() error {
 	if err != nil {
 		return err
 	}
-	return c.validate(f)
-}
-
-// ValidateChat accepts unmapped Chat Completions models with provider-default reasoning.
-// Other adapters retain their existing identity validation.
-func (c ModelConfig) ValidateChat() error {
-	f, err := family.DetectChat(c.CanonicalModel)
-	if err != nil {
-		return err
+	if f == family.Compatible {
+		if _, err := family.Map(f, c.Reasoning.DefaultLevel); err != nil {
+			return err
+		}
+		if c.Reasoning.OpenAI != (OpenAIReasoningConfig{}) {
+			return fmt.Errorf("unmapped models do not support OpenAI reasoning controls")
+		}
+		if c.PromptCaching != (PromptCachingConfig{}) {
+			return fmt.Errorf("unmapped models require provider-default prompt caching")
+		}
 	}
-	if f == family.Compatible && c.Reasoning.DefaultLevel != "" && c.Reasoning.DefaultLevel != genai.ThinkingLevelUnspecified {
-		return fmt.Errorf("unmapped chat models require provider-default reasoning")
-	}
-	return c.validate(f)
-}
-
-func (c ModelConfig) validate(f family.Family) error {
 	if c.RequestModel != "" {
 		if err := family.ValidateRequest(f, c.RequestModel); err != nil {
 			return err
