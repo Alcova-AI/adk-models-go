@@ -13,10 +13,10 @@
 // limitations under the License.
 
 // Package adkopenai implements ADK's model.LLM interface on top of the
-// OpenAI Responses API.
+// OpenAI Responses and Chat Completions APIs.
 //
 // The caller constructs the OpenAI SDK client, so the same adapter can use
 // the direct OpenAI API or a compatible endpoint without the adapter owning
-// credentials or endpoint policy. The optional vercel subpackage adds typed
-// Vercel AI Gateway routing and response metadata.
+// credentials or endpoint policy. Model.Vercel adds typed Vercel AI Gateway
+// routing and response metadata. Responses remains the default API.
 package adkopenai
