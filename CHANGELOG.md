@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.1.6] - README landing page
+
+### Changed
+
+- Introduce the module with a feature overview and adapter quick starts, followed by the reference guide. Retain Chat Completions settings and limits and the existing migration anchor.
+
 ## [v0.1.5] - Chat Completions
 
 ### Added
