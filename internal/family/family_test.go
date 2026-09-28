@@ -53,7 +53,7 @@ func TestNames(t *testing.T) {
 			t.Errorf("%q: %q %v", tt.name, got, err)
 		}
 	}
-	for _, name := range []string{"", "openai/gpt-5.6-luna", "two names"} {
+	for _, name := range []string{"", "openai/gpt-5.6-luna", "two names", "gpt-test/alias", "claude-two names", "gemini-test\talias", "glm-test\nalias", "o3-test\ralias"} {
 		if _, err := Detect(name); err == nil {
 			t.Errorf("accepted %q", name)
 		}

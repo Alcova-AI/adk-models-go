@@ -25,6 +25,9 @@ const (
 
 func Detect(name string) (Family, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || strings.ContainsAny(name, "/ \t\r\n") {
+		return "", fmt.Errorf("canonical model must be a nonempty unqualified name")
+	}
 	switch {
 	case strings.HasPrefix(name, "gpt-"), name == "o1", strings.HasPrefix(name, "o1-"), name == "o3", strings.HasPrefix(name, "o3-"), name == "o4", strings.HasPrefix(name, "o4-"):
 		return OpenAI, nil
@@ -35,9 +38,6 @@ func Detect(name string) (Family, error) {
 	case strings.HasPrefix(name, "glm-"):
 		return ZAI, nil
 	default:
-		if name == "" || strings.ContainsAny(name, "/ \t\r\n") {
-			return "", fmt.Errorf("canonical model must be a nonempty unqualified name")
-		}
 		return Compatible, nil
 	}
 }
