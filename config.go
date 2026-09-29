@@ -37,6 +37,17 @@ func (c ModelConfig) Validate() error {
 	if err != nil {
 		return err
 	}
+	if f == family.Compatible {
+		if _, err := family.Map(f, c.Reasoning.DefaultLevel); err != nil {
+			return err
+		}
+		if c.Reasoning.OpenAI != (OpenAIReasoningConfig{}) {
+			return fmt.Errorf("unmapped models do not support OpenAI reasoning controls")
+		}
+		if c.PromptCaching != (PromptCachingConfig{}) {
+			return fmt.Errorf("unmapped models require provider-default prompt caching")
+		}
+	}
 	if c.RequestModel != "" {
 		if err := family.ValidateRequest(f, c.RequestModel); err != nil {
 			return err

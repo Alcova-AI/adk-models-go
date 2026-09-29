@@ -14,16 +14,20 @@ import (
 type Family string
 
 const (
-	OpenAI    Family              = "openai"
-	Anthropic Family              = "anthropic"
-	Gemini    Family              = "google"
-	ZAI       Family              = "zai"
-	XHigh     genai.ThinkingLevel = "XHIGH"
-	Max       genai.ThinkingLevel = "MAX"
+	Compatible Family              = "compatible"
+	OpenAI     Family              = "openai"
+	Anthropic  Family              = "anthropic"
+	Gemini     Family              = "google"
+	ZAI        Family              = "zai"
+	XHigh      genai.ThinkingLevel = "XHIGH"
+	Max        genai.ThinkingLevel = "MAX"
 )
 
 func Detect(name string) (Family, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || strings.ContainsAny(name, "/ \t\r\n") {
+		return "", fmt.Errorf("canonical model must be a nonempty unqualified name")
+	}
 	switch {
 	case strings.HasPrefix(name, "gpt-"), name == "o1", strings.HasPrefix(name, "o1-"), name == "o3", strings.HasPrefix(name, "o3-"), name == "o4", strings.HasPrefix(name, "o4-"):
 		return OpenAI, nil
@@ -34,7 +38,7 @@ func Detect(name string) (Family, error) {
 	case strings.HasPrefix(name, "glm-"):
 		return ZAI, nil
 	default:
-		return "", fmt.Errorf("unrecognised canonical model %q", name)
+		return Compatible, nil
 	}
 }
 
@@ -52,6 +56,13 @@ func ValidateRequest(canonical Family, request string) error {
 			return err
 		}
 		if namespace != canonical {
+			// A provider namespace does not establish a model family. For example,
+			// google/gemma is not a Gemini model, while google/gemini remains known.
+			if canonical == Compatible {
+				if actual, err := Detect(suffix); err == nil && actual == Compatible {
+					return nil
+				}
+			}
 			return fmt.Errorf("request model family %q differs from canonical family %q", namespace, canonical)
 		}
 	}
@@ -60,7 +71,7 @@ func ValidateRequest(canonical Family, request string) error {
 
 func compareKnown(expected Family, name string) error {
 	actual, err := Detect(name)
-	if err == nil && actual != expected {
+	if err == nil && actual != Compatible && actual != expected {
 		return fmt.Errorf("request model family %q differs from expected family %q", actual, expected)
 	}
 	return nil
@@ -88,6 +99,8 @@ func Map(f Family, level genai.ThinkingLevel) (Reasoning, error) {
 		return Reasoning{}, nil
 	}
 	switch f {
+	case Compatible:
+		return Reasoning{}, fmt.Errorf("unmapped models require provider-default reasoning; leave ThinkingLevel unset")
 	case OpenAI:
 		return Reasoning{Effort: openAI(level)}, nil
 	case Anthropic:

@@ -18,10 +18,10 @@
 ## Why ADK Models Go?
 
 - **One module, three adapters**: `anthropic`, `openai` and `vercel` packages share one version and one `ModelConfig`. This replaces the separate `adk-anthropic-go`, `adk-openai-go` and `adk-vercel-go` modules.
-- **One reasoning scale for every model**: set `genai.ThinkingLevel` once. The adapters map it to each family's native setting (see [family mappings](#family-mappings)).
+- **Shared reasoning levels for mapped families**: set `genai.ThinkingLevel` once. The adapters map it to each family's native setting (see [family mappings](#family-mappings)).
 - **You own the client**: pass your own Anthropic or OpenAI SDK client, so authentication, endpoints, retries and HTTP behaviour stay under your control.
 - **Multiple model families through Vercel**: route across providers with typed routing, zero-data-retention and caching settings on `VercelConfig`.
-- **Tool schemas checked before sending**: each adapter rejects JSON Schema rules the provider cannot keep, instead of letting the provider drop them without notice. See the [live schema matrix](testdata/schema-matrix/README.md).
+- **Tool schemas checked before sending**: each adapter rejects JSON Schema rules the provider cannot keep, instead of letting the provider drop them without notice. Unmapped models keep validated schema constraints without a verified provider profile. See the [live schema matrix](testdata/schema-matrix/README.md).
 - **No hidden fallbacks**: the library never switches request format, lowers reasoning effort, weakens retention, or strips caching and retries. Provider errors reach you unchanged.
 
 ---
@@ -108,7 +108,7 @@ llm, err := adkopenai.NewModel(adkopenai.Config{
 })
 ```
 
-The OpenAI adapter sends `store: false`. ADK owns the conversation history. Responses preserves opaque reasoning state needed for later turns; Chat Completions rejects reasoning history.
+For recognised families, the OpenAI adapter sends `store: false`. Unmapped models use provider defaults. ADK owns the conversation history. Responses preserves opaque reasoning state needed for later turns; Chat Completions rejects reasoning history.
 
 #### Chat Completions
 
@@ -181,9 +181,9 @@ Each adapter implements ADK's `model.LLM` interface. Choose the request format e
 
 | Package | Request format | Client | Model families |
 |---|---|---|---|
-| `anthropic` | Anthropic Messages | Your Anthropic SDK client | Anthropic |
-| `openai` | OpenAI Responses (default) or Chat Completions | Your OpenAI SDK client | OpenAI |
-| `vercel` | Native Vercel | Optional HTTP client | Any recognised family |
+| `anthropic` | Anthropic Messages | Your Anthropic SDK client | Anthropic, or unmapped models on compatible endpoints |
+| `openai` | OpenAI Responses (default) or Chat Completions | Your OpenAI SDK client | OpenAI, or unmapped models on compatible endpoints |
+| `vercel` | Native Vercel | Optional HTTP client | Recognised families and unmapped models |
 
 - For direct Gemini, use Google ADK's own Gemini adapter. For Gemini through Vercel, use this library.
 - To call a model from a different family, use the `vercel` adapter.
@@ -207,9 +207,39 @@ A recognised model family does not guarantee that an endpoint supports that mode
 
 - Family detection ignores case and surrounding spaces.
 - Canonical names must not have a gateway prefix. Put prefixes such as `openai/` in `RequestModel`.
-- The library rejects unrecognised canonical names. There is no family override.
+- All adapters accept unmapped canonical names with provider-default settings. There is no family override.
 - The library rejects a request name from a different recognised family. It accepts unknown endpoint aliases without a family check.
 - The library never rewrites a request name you supply.
+
+#### Unmapped models
+
+All adapters accept unqualified canonical names without a known family mapping,
+such as `gemma-4-31B-it` or `mimo-v2.6-pro`. Configure the correct protocol,
+endpoint and credentials on the selected adapter. `RequestModel` remains the
+exact endpoint identifier, including any gateway namespace. No provider-specific
+configuration field or family override is needed.
+
+For these models, leave reasoning levels and typed prompt-cache controls unset.
+Explicit levels, OpenAI reasoning controls and typed cache settings are rejected
+rather than mapped to another family or silently ignored. Gateway routing and
+provider options continue to use `ModelConfig.Vercel`. Known-family identity
+checks and reasoning mappings remain in place.
+
+Tool schemas retain their validated constraints without enabling strict decoding
+or claiming a verified provider profile. Applications must validate tool
+arguments. Each adapter reuses its protocol's streaming, tool-call and history
+handling; accepting a model name does not verify that its endpoint supports that
+protocol or every feature. Chat Completions still rejects reasoning output and
+reasoning history. Anthropic, Responses and native Vercel retain their existing
+protocol-specific reasoning-history support.
+
+All Chat Completions models use `max_completion_tokens`. Unmapped Chat Completions and
+Responses models omit OpenAI-specific storage and encrypted-reasoning request
+controls. Provider data-retention guarantees must be established independently.
+
+The opt-in MiMo test from PR #8 remains available with `ADK_MIMO_LIVE=1 go test
+-count=1 -v . -run '^TestMiMoGatewayLive$'` and `AI_GATEWAY_API_KEY`. It exercises
+native Vercel tool calls in both modes; it does not verify other protocols.
 
 ---
 
@@ -228,7 +258,7 @@ The library adds `adkmodels.ThinkingLevelXHigh` and `adkmodels.ThinkingLevelMax`
 
 ### Family mappings
 
-The same mapping applies across all adapters.
+The same mapping applies across all adapters. Models without a mapping use provider-default reasoning and reject explicit thinking levels.
 
 | Requested level | OpenAI effort | Anthropic effort / thinking | Gemini level | Z.ai effort |
 |---|---|---|---|---|
@@ -261,14 +291,14 @@ retention and provider reasoning options remain available.
 
 - Retention is allowed by default. Set `ZeroDataRetention: true` to require zero data retention.
 - The library sends that requirement to Vercel and returns any gateway error. It never weakens the requirement and keeps no local list of which providers support it.
-- OpenAI's `store: false` applies whatever the gateway retention setting is.
+- For recognised families, OpenAI's `store: false` applies whatever the gateway retention setting is. Unmapped models do not receive this OpenAI-specific control.
 - The library rejects raw provider options that conflict with typed settings.
 
 ---
 
 ## Prompt caching
 
-Caching controls are unset by default. Providers may still cache on their own.
+Caching controls are unset by default. Providers may still cache on their own. [Unmapped models](#unmapped-models) require provider-default caching and reject typed cache controls.
 
 Set caching through `ModelConfig.PromptCaching`:
 
@@ -298,7 +328,7 @@ The library does not log metadata or add it to traces. You decide what to record
 
 ## Tool schema compatibility
 
-Providers support different parts of JSON Schema. The adapters check your tool schemas before they send a request. They reject rules that the selected provider cannot keep. This check is on by default and needs no configuration.
+Providers support different parts of JSON Schema. The adapters check your tool schemas before they send a request. They reject rules that the selected provider cannot keep. This check is on by default for known provider profiles. Unmapped models retain validated constraints without strict decoding or a verified provider profile.
 
 Define each tool's inputs with **one** of these fields:
 

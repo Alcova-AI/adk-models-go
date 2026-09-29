@@ -22,6 +22,9 @@ type resolvedReasoning struct {
 
 func (c reasoningConfig) resolve(cfg *genai.ThinkingConfig) (resolvedReasoning, error) {
 	level, include, err := family.Resolve(c.DefaultLevel, cfg)
+	if err == nil && c.Family == family.Compatible {
+		_, err = family.Map(c.Family, level)
+	}
 	return resolvedReasoning{level, include}, err
 }
 

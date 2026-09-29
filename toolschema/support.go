@@ -17,7 +17,8 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 	if depth > 64 {
 		return fmt.Errorf("tool %q schema %s exceeds nesting limit", tool, path)
 	}
-	if !slices.Contains([]string{"openai", "anthropic", "google"}, p.target.Provider) {
+	genericCompatible := p.target.Provider == "compatible"
+	if !genericCompatible && !slices.Contains([]string{"openai", "anthropic", "google"}, p.target.Provider) {
 		return p.loss(ctx, tool, path, "provider", "no verified tool schema compatibility profile")
 	}
 	if p.target.Provider == "anthropic" {
@@ -42,7 +43,7 @@ func (p *Processor) adapt(ctx context.Context, tool string, obj map[string]any, 
 			return fmt.Errorf("tool %q schema %s/%s: dynamic references are not supported by this trial", tool, path, key)
 		}
 		rootAlternative := path == "#" && (key == "anyOf" || key == "allOf") && (p.target.Provider == "anthropic" || (p.target.Provider == "google" && strings.HasPrefix(p.target.Route, "vercel")))
-		if rootAlternative || !p.supports(key, obj[key]) {
+		if rootAlternative || (!genericCompatible && !p.supports(key, obj[key])) {
 			if err := p.loss(ctx, tool, path+"/"+escape(key), key, "constraint cannot be preserved by this route"); err != nil {
 				return err
 			}

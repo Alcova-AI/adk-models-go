@@ -74,7 +74,7 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if err != nil {
 		return nil, err
 	}
-	if f != family.OpenAI && cfg.Model.Vercel == nil {
+	if f != family.OpenAI && f != family.Compatible && cfg.Model.Vercel == nil {
 		return nil, fmt.Errorf("direct openai adapter requires its own model family; cross-family requests require Vercel")
 	}
 	cache := cfg.Model.PromptCaching.OpenAI
@@ -165,7 +165,7 @@ func (m *openAIModel) convertRequest(req *model.LLMRequest) (responses.ResponseN
 	if err := applyPromptCaching(&params, m.promptCaching); err != nil {
 		return responses.ResponseNewParams{}, fmt.Errorf("failed to configure prompt caching: %w", err)
 	}
-	{
+	if m.family != family.Compatible {
 		params.Store = param.NewOpt(false)
 		params.Include = appendUniqueInclude(params.Include, responses.ResponseIncludableReasoningEncryptedContent)
 	}
