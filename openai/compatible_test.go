@@ -29,10 +29,10 @@ func TestCompatibleChatRoundTrip(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if r.URL.Path != "/chat/completions" || body["model"] != "gemma-4-31B-it" || body["max_tokens"] != float64(8192) {
+					if r.URL.Path != "/chat/completions" || body["model"] != "gemma-4-31B-it" || body["max_completion_tokens"] != float64(8192) {
 						t.Errorf("bad route or token limit: %v", body)
 					}
-					for _, key := range []string{"store", "max_completion_tokens", "reasoning_effort"} {
+					for _, key := range []string{"store", "max_tokens", "reasoning_effort"} {
 						if _, ok := body[key]; ok {
 							t.Errorf("unexpected %s", key)
 						}

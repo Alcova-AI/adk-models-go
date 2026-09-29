@@ -233,7 +233,7 @@ protocol or every feature. Chat Completions still rejects reasoning output and
 reasoning history. Anthropic, Responses and native Vercel retain their existing
 protocol-specific reasoning-history support.
 
-Unmapped Chat Completions models use `max_tokens`. Unmapped Chat Completions and
+All Chat Completions models use `max_completion_tokens`. Unmapped Chat Completions and
 Responses models omit OpenAI-specific storage and encrypted-reasoning request
 controls. Provider data-retention guarantees must be established independently.
 

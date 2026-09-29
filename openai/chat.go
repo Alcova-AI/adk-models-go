@@ -113,14 +113,11 @@ func (m *chatModel) generate(ctx context.Context, req *model.LLMRequest, stream 
 	if resolved.IncludeThoughts {
 		return singleErrorSequence(fmt.Errorf("openai chat: reasoning output is unsupported; use Responses"))
 	}
-	// Unmapped compatible endpoints use the original Chat Completions token field.
-	// Do not send OpenAI-specific storage or reasoning controls.
+	// Do not send OpenAI-specific storage or reasoning controls for unmapped models.
 	if m.reasoning.Family == family.Compatible {
 		if resolved.ThinkingLevel != "" && resolved.ThinkingLevel != genai.ThinkingLevelUnspecified {
 			return singleErrorSequence(fmt.Errorf("unmapped chat models require provider-default reasoning"))
 		}
-		params.MaxTokens = params.MaxCompletionTokens
-		params.MaxCompletionTokens = param.Opt[int64]{}
 		params.Store = param.Opt[bool]{}
 	}
 	var options []option.RequestOption
