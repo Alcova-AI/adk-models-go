@@ -59,9 +59,6 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if cfg.Model.PromptCaching.SystemInstructionPartIndex != nil {
 		cfg.Model.PromptCaching.SystemInstructionPartIndex = new(*cfg.Model.PromptCaching.SystemInstructionPartIndex)
 	}
-	if cfg.API == APIChatCompletions && cfg.Model.PromptCaching.SystemInstructionPartIndex != nil {
-		return nil, fmt.Errorf("selected system cache boundaries require Responses or native Vercel")
-	}
 	switch cfg.API {
 	case "", APIResponses:
 	case APIChatCompletions:

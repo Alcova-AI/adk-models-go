@@ -145,7 +145,7 @@ llm, err := adkopenai.NewModel(adkopenai.Config{
 The [opt-in live test matrix](openai/chat_live_test.go) covers direct OpenAI and
 Vercel. Run `ADK_CHAT_LIVE=1 go test ./openai -run '^TestChatLiveMatrix$' -count=1 -v`
 with the required `OPENAI_API_KEY` and/or `AI_GATEWAY_API_KEY`. Select a route with
-`ADK_CHAT_LIVE_ROUTE=direct`, `vercel-openai` or `vercel-google`. The suite disables
+`ADK_CHAT_LIVE_ROUTE=direct`, `vercel-openai`, `vercel-azure` or `vercel-google`. The suite disables
 retries and reserves at most USD 0.10 per run at its documented fixture rates.
 
 ### Vercel AI Gateway
@@ -304,12 +304,12 @@ Set caching through `ModelConfig.PromptCaching`:
 
 - **Anthropic**: set `Anthropic.Mode` to `AnthropicPromptCacheManual`, then set breakpoints with their lifetimes.
 - **OpenAI Responses**: set `OpenAI.Mode` to implicit or explicit, with an optional cache key and breakpoints.
-- **OpenAI Chat Completions**: supports an optional cache key for OpenAI models; explicit cache modes and breakpoints return an error.
+- **OpenAI Chat Completions**: supports implicit or explicit cache mode, an optional cache key and text breakpoints for OpenAI models that support these controls (GPT-5.6 and later). Direct OpenAI is live-tested. Set `ADK_CHAT_LIVE_MODEL=gpt-5.6-luna` to test that model; gateway boundary probes require `ADK_CHAT_LIVE_CACHE_PROBE=1` and currently fail the cache-reuse assertion. Vercel’s Chat compatibility endpoint accepted the controls but returned no shared-prefix cache hits in live tests; use native Vercel for verified gateway boundaries.
 - **Vercel**: set `VercelConfig.Caching` to `GatewayCachingAuto` for gateway-managed caching. Native requests also accept exact request-level cache settings in `VercelConfig.ProviderOptions` and exact marker maps in `SystemInstructionCacheOptions` and `ConversationHistoryCacheOptions`. Supplied markers replace generated markers; typed and raw OpenAI request cache settings must not conflict.
 
-Set optional `PromptCaching.SystemInstructionPartIndex` to the zero-based GenAI system part where the shared prefix ends. OpenAI Responses and Anthropic Messages mark the selected prefix; native Vercel emits a separate system message before the variable suffix and copies the supplied marker map onto that message. Omit the index to retain legacy conversion and breakpoint placement. Invalid, empty or non-text selected boundaries return an error. Chat Completions does not support this selector.
+Set optional `PromptCaching.SystemInstructionPartIndex` to the zero-based GenAI system part where the shared prefix ends. OpenAI Responses, OpenAI Chat Completions and Anthropic Messages mark the selected prefix; native Vercel emits a separate system message before the variable suffix and copies the supplied marker map onto that message. Omit the index to retain legacy conversion and breakpoint placement. Invalid, empty or non-text selected boundaries return an error.
 
-Cache support depends on the adapter and model family. Chat Completions rejects the unsupported controls listed above. Conflicting configuration is an error. The library does not strip settings and retry after a provider rejects a request.
+Cache support depends on the adapter and model family. Conflicting configuration is an error. The library does not strip settings and retry after a provider rejects a request.
 
 ---
 
