@@ -52,8 +52,9 @@ const (
 )
 
 type anthropicModel struct {
-	schemas *toolschema.Processor
-	client  anthropic.Client
+	systemInstructionPartIndex *int
+	schemas                    *toolschema.Processor
+	client                     anthropic.Client
 	// canonicalModel is exposed through Name and controls local capabilities.
 	canonicalModel anthropic.Model
 	// requestModel is the model identifier sent to the API.
@@ -73,6 +74,9 @@ type anthropicModel struct {
 // The adapter does not discover credentials, select endpoints, or infer gateway
 // capabilities from model names.
 func NewModel(cfg Config) (model.LLM, error) {
+	if cfg.Model.PromptCaching.SystemInstructionPartIndex != nil {
+		cfg.Model.PromptCaching.SystemInstructionPartIndex = new(*cfg.Model.PromptCaching.SystemInstructionPartIndex)
+	}
 	if len(cfg.Client.Options) == 0 {
 		return nil, fmt.Errorf("client must be constructed with anthropic.NewClient")
 	}
@@ -111,7 +115,7 @@ func NewModel(cfg Config) (model.LLM, error) {
 		schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
 		client:  cfg.Client, canonicalModel: anthropic.Model(cfg.Model.CanonicalModel), requestModel: anthropic.Model(requestModel),
 		defaultMaxTokens: tokens, reasoning: reasoningConfig{DefaultLevel: cfg.Model.Reasoning.DefaultLevel, OpenAI: cfg.Model.Reasoning.OpenAI, Family: f},
-		promptCaching: cache, vercel: cfg.Model.Vercel, family: f, retrySleep: sleepWithContext,
+		promptCaching: cache, systemInstructionPartIndex: cfg.Model.PromptCaching.SystemInstructionPartIndex, vercel: cfg.Model.Vercel, family: f, retrySleep: sleepWithContext,
 	}, nil
 }
 
@@ -520,8 +524,22 @@ func (m *anthropicModel) convertRequest(req *model.LLMRequest) (anthropic.Messag
 		}
 	}
 
+	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex)
+	if err != nil {
+		return anthropic.MessageNewParams{}, err
+	}
+	if len(texts) > 0 {
+		params.System = nil
+		for _, text := range texts {
+			params.System = append(params.System, anthropic.TextBlockParam{Text: text})
+		}
+	}
 	if m.promptCaching.Mode == adkmodels.AnthropicPromptCacheManual {
 		applyCacheBreakpoints(&params, &m.promptCaching)
+		if len(texts) > 0 && m.promptCaching.SystemInstruction != nil {
+			params.System[len(params.System)-1].CacheControl = anthropic.CacheControlEphemeralParam{}
+			params.System[0].CacheControl = newCacheControl(m.promptCaching.SystemInstruction)
+		}
 	}
 
 	return params, nil

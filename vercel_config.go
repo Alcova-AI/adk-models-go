@@ -58,6 +58,11 @@ type VercelConfig struct {
 	ZeroDataRetention      bool
 	// ProviderOptions contains provider-specific namespaces, excluding gateway.
 	ProviderOptions map[string]map[string]any
+	// SystemInstructionCacheOptions is copied verbatim onto the selected native
+	// system boundary. It replaces the generated OpenAI marker when non-empty.
+	SystemInstructionCacheOptions map[string]map[string]any
+	// ConversationHistoryCacheOptions replaces generated native history markers.
+	ConversationHistoryCacheOptions map[string]map[string]any
 	// GatewayOptions holds additional gateway fields without overriding typed ones.
 	GatewayOptions map[string]any
 }
@@ -85,6 +90,21 @@ func (c VercelConfig) Validate() error {
 			}
 			if reservedProviderKey(key) {
 				return fmt.Errorf("vercel provider option %s.%s conflicts with adapter-owned reasoning, caching, or data policy", namespace, key)
+			}
+		}
+	}
+	for _, options := range []map[string]map[string]any{c.SystemInstructionCacheOptions, c.ConversationHistoryCacheOptions} {
+		for namespace, values := range options {
+			if err := validateName("cache namespace", namespace); err != nil {
+				return err
+			}
+			if strings.EqualFold(namespace, "gateway") {
+				return fmt.Errorf("gateway namespace is not valid for cache markers")
+			}
+			for key := range values {
+				if key != "promptCacheBreakpoint" && key != "cacheControl" {
+					return fmt.Errorf("unsupported cache marker option %s.%s", namespace, key)
+				}
 			}
 		}
 	}
@@ -153,7 +173,7 @@ func normalisedOptionKey(key string) string {
 }
 func reservedProviderKey(key string) bool {
 	switch normalisedOptionKey(key) {
-	case "gateway", "thinking", "thinkingconfig", "reasoning", "reasoningeffort", "effort", "reasoningsummary", "reasoningcontext", "reasoningmode", "outputconfig", "cachecontrol", "zerodataretention", "store", "promptcachekey", "promptcacheoptions", "promptcachebreakpoint":
+	case "gateway", "thinking", "thinkingconfig", "reasoning", "reasoningeffort", "effort", "reasoningsummary", "reasoningcontext", "reasoningmode", "outputconfig", "cachecontrol", "zerodataretention", "store", "promptcachebreakpoint":
 		return true
 	default:
 		return false

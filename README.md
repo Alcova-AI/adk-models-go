@@ -305,7 +305,9 @@ Set caching through `ModelConfig.PromptCaching`:
 - **Anthropic**: set `Anthropic.Mode` to `AnthropicPromptCacheManual`, then set breakpoints with their lifetimes.
 - **OpenAI Responses**: set `OpenAI.Mode` to implicit or explicit, with an optional cache key and breakpoints.
 - **OpenAI Chat Completions**: supports an optional cache key for OpenAI models; explicit cache modes and breakpoints return an error.
-- **Vercel**: set `VercelConfig.Caching` to `GatewayCachingAuto` for gateway-managed caching.
+- **Vercel**: set `VercelConfig.Caching` to `GatewayCachingAuto` for gateway-managed caching. Native requests also accept exact request-level cache settings in `VercelConfig.ProviderOptions` and exact marker maps in `SystemInstructionCacheOptions` and `ConversationHistoryCacheOptions`. Supplied markers replace generated markers; typed and raw OpenAI request cache settings must not conflict.
+
+Set optional `PromptCaching.SystemInstructionPartIndex` to the zero-based GenAI system part where the shared prefix ends. OpenAI Responses and Anthropic Messages mark the selected prefix; native Vercel emits a separate system message before the variable suffix and copies the supplied marker map onto that message. Omit the index to retain legacy conversion and breakpoint placement. Invalid, empty or non-text selected boundaries return an error. Chat Completions does not support this selector.
 
 Cache support depends on the adapter and model family. Chat Completions rejects the unsupported controls listed above. Conflicting configuration is an error. The library does not strip settings and retry after a provider rejects a request.
 
