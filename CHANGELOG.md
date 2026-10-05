@@ -1,6 +1,6 @@
 # Changelog
 
-## [v0.1.8] - Explicit prompt cache boundaries
+## [v0.1.8] - Native Vercel tool schemas and prompt cache boundaries
 
 ### Added
 
