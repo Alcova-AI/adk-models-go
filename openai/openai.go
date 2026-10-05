@@ -40,21 +40,28 @@ import (
 const defaultMaxTokens = 16384
 
 type openAIModel struct {
-	schemas          *toolschema.Processor
-	client           openai.Client
-	canonicalModel   shared.ResponsesModel
-	requestModel     shared.ResponsesModel
-	defaultMaxTokens int
-	reasoning        reasoningConfig
-	promptCaching    adkmodels.OpenAIPromptCachingConfig
-	vercel           *adkmodels.VercelConfig
-	family           family.Family
+	systemInstructionPartIndex *int
+	schemas                    *toolschema.Processor
+	client                     openai.Client
+	canonicalModel             shared.ResponsesModel
+	requestModel               shared.ResponsesModel
+	defaultMaxTokens           int
+	reasoning                  reasoningConfig
+	promptCaching              adkmodels.OpenAIPromptCachingConfig
+	vercel                     *adkmodels.VercelConfig
+	family                     family.Family
 }
 
 // NewModel returns an ADK model backed by a caller-owned OpenAI SDK client.
 // The adapter does not discover credentials, select endpoints, or infer gateway
 // capabilities from model names.
 func NewModel(cfg Config) (model.LLM, error) {
+	if cfg.Model.PromptCaching.SystemInstructionPartIndex != nil {
+		cfg.Model.PromptCaching.SystemInstructionPartIndex = new(*cfg.Model.PromptCaching.SystemInstructionPartIndex)
+	}
+	if cfg.API == APIChatCompletions && cfg.Model.PromptCaching.SystemInstructionPartIndex != nil {
+		return nil, fmt.Errorf("selected system cache boundaries require Responses or native Vercel")
+	}
 	switch cfg.API {
 	case "", APIResponses:
 	case APIChatCompletions:
@@ -101,7 +108,7 @@ func NewModel(cfg Config) (model.LLM, error) {
 		schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
 		client:  cfg.Client, canonicalModel: shared.ResponsesModel(cfg.Model.CanonicalModel), requestModel: shared.ResponsesModel(requestModel),
 		defaultMaxTokens: tokens, reasoning: reasoningConfig{DefaultLevel: cfg.Model.Reasoning.DefaultLevel, OpenAI: cfg.Model.Reasoning.OpenAI, Family: f},
-		promptCaching: cache, vercel: cfg.Model.Vercel, family: f,
+		promptCaching: cache, systemInstructionPartIndex: cfg.Model.PromptCaching.SystemInstructionPartIndex, vercel: cfg.Model.Vercel, family: f,
 	}, nil
 }
 
@@ -159,10 +166,21 @@ func (m *openAIModel) convertRequest(req *model.LLMRequest) (responses.ResponseN
 	if err != nil {
 		return responses.ResponseNewParams{}, fmt.Errorf("failed to convert request: %w", err)
 	}
+	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex)
+	if err != nil {
+		return responses.ResponseNewParams{}, err
+	}
+	if len(texts) > 0 {
+		message := params.Input.OfInputItemList[0].OfMessage
+		message.Content.OfInputItemContentList = nil
+		for _, text := range texts {
+			message.Content.OfInputItemContentList = append(message.Content.OfInputItemContentList, responses.ResponseInputContentParamOfInputText(text))
+		}
+	}
 	if err := applyReasoning(&params, req.Config, m.reasoning); err != nil {
 		return responses.ResponseNewParams{}, fmt.Errorf("failed to configure reasoning: %w", err)
 	}
-	if err := applyPromptCaching(&params, m.promptCaching); err != nil {
+	if err := applyPromptCachingWithBoundary(&params, m.promptCaching, m.systemInstructionPartIndex != nil); err != nil {
 		return responses.ResponseNewParams{}, fmt.Errorf("failed to configure prompt caching: %w", err)
 	}
 	if m.family != family.Compatible {

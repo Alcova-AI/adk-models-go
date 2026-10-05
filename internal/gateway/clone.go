@@ -23,6 +23,8 @@ func CloneConfig(source *adkmodels.VercelConfig) *adkmodels.VercelConfig {
 	result.Has = slices.Clone(source.Has)
 	result.Tags = slices.Clone(source.Tags)
 	result.ProviderOptions = Clone(source.ProviderOptions)
+	result.SystemInstructionCacheOptions = cloneCacheOptions(source.SystemInstructionCacheOptions)
+	result.ConversationHistoryCacheOptions = cloneCacheOptions(source.ConversationHistoryCacheOptions)
 	result.GatewayOptions = maps.Clone(source.GatewayOptions)
 	if source.ProviderTimeouts != nil {
 		result.ProviderTimeouts = &adkmodels.GatewayProviderTimeouts{BYOK: maps.Clone(source.ProviderTimeouts.BYOK)}
@@ -43,4 +45,32 @@ func cloneBYOK(source map[string][]map[string]any) map[string][]map[string]any {
 		result[provider] = entries
 	}
 	return result
+}
+
+func cloneCacheOptions(source map[string]map[string]any) map[string]map[string]any {
+	result := Clone(source)
+	for _, values := range result {
+		for key, value := range values {
+			values[key] = cloneCacheValue(value)
+		}
+	}
+	return result
+}
+func cloneCacheValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		copy := make(map[string]any, len(v))
+		for k, child := range v {
+			copy[k] = cloneCacheValue(child)
+		}
+		return copy
+	case []any:
+		copy := make([]any, len(v))
+		for i, child := range v {
+			copy[i] = cloneCacheValue(child)
+		}
+		return copy
+	default:
+		return value
+	}
 }

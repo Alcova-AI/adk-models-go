@@ -15,6 +15,8 @@
 package adkanthropic
 
 import (
+	adkmodels "github.com/Alcova-AI/adk-models-go"
+	"google.golang.org/adk/v2/model"
 	"testing"
 
 	converters "github.com/Alcova-AI/adk-models-go/internal/anthropicconvert"
@@ -334,5 +336,18 @@ func TestApplyCacheBreakpoints_EmptyConfig(t *testing.T) {
 	ccPtr := last.GetCacheControl()
 	if ccPtr != nil && string(ccPtr.Type) == "ephemeral" {
 		t.Error("expected penultimate message block CacheControl to be empty")
+	}
+}
+
+func TestSelectedSystemPartBoundary(t *testing.T) {
+	index := 0
+	m := &anthropicModel{canonicalModel: "claude-sonnet-4-6", requestModel: "claude-sonnet-4-6", defaultMaxTokens: 64, systemInstructionPartIndex: &index, promptCaching: adkmodels.AnthropicPromptCachingConfig{Mode: adkmodels.AnthropicPromptCacheManual, SystemInstruction: &adkmodels.AnthropicCacheBreakpoint{TTL: "1h"}}}
+	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("question", genai.RoleUser)}, Config: &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: "shared"}, {Text: "dynamic"}}}}}
+	params, err := m.convertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(params.System) != 2 || params.System[0].Text != "shared" || params.System[0].CacheControl.TTL != "1h" || params.System[1].CacheControl.Type != "" {
+		t.Fatalf("boundary = %#v", params.System)
 	}
 }

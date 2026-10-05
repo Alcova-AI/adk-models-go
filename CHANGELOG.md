@@ -1,6 +1,11 @@
 # Changelog
 
-## [v0.1.8] - Empty native Vercel tool schemas
+## [v0.1.8] - Explicit prompt cache boundaries
+
+### Added
+
+- Select a shared system-prefix boundary by GenAI part index for OpenAI Responses, Anthropic Messages and native Vercel. Omitted selectors preserve existing conversion and breakpoint placement.
+- Pass native Vercel cache settings through provider options and supply exact system and history marker namespaces, including Azure. Reject conflicting typed OpenAI cache settings.
 
 ### Fixed
 
