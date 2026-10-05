@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.1.8] - Empty native Vercel tool schemas
+
+### Fixed
+
+- Include an empty `properties` object in native Vercel function schemas with no declared properties, so zero-argument tools are accepted by the gateway.
+
 ## [v0.1.7] - Compatible models across adapters
 
 ### Added

@@ -4,6 +4,7 @@
 package adkvercel
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
+	"github.com/Alcova-AI/adk-models-go/toolschema"
 
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -355,6 +357,55 @@ func TestOpenAIStructuredSchemaIsStrictWithoutMutatingCaller(t *testing.T) {
 			}
 			if string(before) != string(after) {
 				t.Fatal("caller schema changed")
+			}
+		})
+	}
+}
+
+func TestGenerateZeroArgumentToolSchema(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		declaration *genai.FunctionDeclaration
+	}{
+		{"typed", &genai.FunctionDeclaration{Name: "list_skills", Parameters: &genai.Schema{Type: genai.TypeObject}}},
+		{"raw", &genai.FunctionDeclaration{Name: "list_skills", ParametersJsonSchema: json.RawMessage(`{"type":"object"}`)}},
+		{"explicit", &genai.FunctionDeclaration{Name: "list_skills", ParametersJsonSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}},
+		{"omitted", &genai.FunctionDeclaration{Name: "list_skills"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				var body protocol.CallOptions
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if len(body.Tools) != 1 || body.Tools[0].Name != "list_skills" {
+					t.Fatalf("tools = %#v", body.Tools)
+				}
+				properties, ok := body.Tools[0].InputSchema["properties"].(map[string]any)
+				if !ok || len(properties) != 0 {
+					t.Fatalf("zero-argument schema = %#v", body.Tools[0].InputSchema)
+				}
+				return jsonResponse(req, `{"content":[{"type":"text","text":"OK"}],"finishReason":{"unified":"stop","raw":"stop"}}`), nil
+			})
+			llm, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: transport}, Model: adkmodels.ModelConfig{
+				CanonicalModel: "gpt-5.6-luna", RequestModel: "openai/gpt-5.6-luna",
+				ToolSchemas: toolschema.Config{AllowUnsupported: true, Warn: func(context.Context, toolschema.Warning) {}},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("List skills", genai.RoleUser)}, Config: &genai.GenerateContentConfig{
+				Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{tt.declaration}}},
+			}}
+			for _, err := range llm.GenerateContent(t.Context(), req, false) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if calls != 1 {
+				t.Fatalf("HTTP calls = %d", calls)
 			}
 		})
 	}

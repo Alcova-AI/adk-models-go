@@ -98,6 +98,13 @@ func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMReques
 	}
 	for i := range options.Tools {
 		schema := prepared[options.Tools[i].Name]
+		// The native gateway requires properties even for zero-argument tools.
+		// An empty properties map does not change JSON Schema validation.
+		if schema.Schema["type"] == "object" {
+			if _, exists := schema.Schema["properties"]; !exists {
+				schema.Schema["properties"] = map[string]any{}
+			}
+		}
 		options.Tools[i].InputSchema = schema.Schema
 		options.Tools[i].Strict = schema.Strict
 	}
