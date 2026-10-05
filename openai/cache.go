@@ -21,9 +21,6 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 )
 
-func applyPromptCaching(params *responses.ResponseNewParams, cfg adkmodels.OpenAIPromptCachingConfig) error {
-	return applyPromptCachingWithBoundary(params, cfg, false)
-}
 func applyPromptCachingWithBoundary(params *responses.ResponseNewParams, cfg adkmodels.OpenAIPromptCachingConfig, selected bool) error {
 	if cfg.Key != "" {
 		params.PromptCacheKey = param.NewOpt(cfg.Key)
@@ -48,9 +45,6 @@ func applyPromptCachingWithBoundary(params *responses.ResponseNewParams, cfg adk
 	return nil
 }
 
-func markInstructionBreakpoint(items responses.ResponseInputParam) bool {
-	return markInstructionBreakpointWithBoundary(items, false)
-}
 func markInstructionBreakpointWithBoundary(items responses.ResponseInputParam, selected bool) bool {
 	for i := range items {
 		message := items[i].OfMessage
