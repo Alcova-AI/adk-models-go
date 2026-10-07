@@ -496,3 +496,62 @@ func TestNativeAnthropicSuppliedCacheMarkers(t *testing.T) {
 		}
 	}
 }
+
+func TestTypedCacheModesPreserveNativeMarkerMaps(t *testing.T) {
+	for _, mode := range []adkmodels.OpenAIPromptCacheMode{adkmodels.OpenAIPromptCacheImplicit, adkmodels.OpenAIPromptCacheExplicit} {
+		t.Run(string(mode), func(t *testing.T) {
+			index := 0
+			marker := map[string]map[string]any{"azure": {"promptCacheBreakpoint": map[string]any{"mode": "explicit"}}}
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				prompt := body["prompt"].([]any)
+				shared := prompt[0].(map[string]any)
+				if shared["content"] != "shared" || !reflect.DeepEqual(shared["providerOptions"], map[string]any{"azure": map[string]any{"promptCacheBreakpoint": map[string]any{"mode": "explicit"}}}) {
+					t.Fatalf("shared marker: %#v", shared)
+				}
+				if runtime := prompt[1].(map[string]any); runtime["providerOptions"] != nil {
+					t.Fatalf("runtime suffix marked: %#v", runtime)
+				}
+				count := 1
+				for _, message := range prompt[2:] {
+					for _, part := range message.(map[string]any)["content"].([]any) {
+						if options := part.(map[string]any)["providerOptions"]; options != nil {
+							if !reflect.DeepEqual(options, shared["providerOptions"]) {
+								t.Fatalf("history marker: %#v", options)
+							}
+							count++
+						}
+					}
+				}
+				want := 4
+				if mode == adkmodels.OpenAIPromptCacheImplicit {
+					want = 3
+				}
+				if count != want {
+					t.Fatalf("markers = %d, want %d", count, want)
+				}
+				return jsonResponse(request, `{"content":[{"type":"text","text":"OK"}],"finishReason":{"unified":"stop","raw":"stop"}}`), nil
+			})
+			llm, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: transport}, Model: adkmodels.ModelConfig{
+				CanonicalModel: "gpt-5.6-luna", RequestModel: "openai/gpt-5.6-luna",
+				Vercel:        &adkmodels.VercelConfig{SystemInstructionCacheOptions: marker, ConversationHistoryCacheOptions: marker},
+				PromptCaching: adkmodels.PromptCachingConfig{SystemInstructionPartIndex: &index, OpenAI: adkmodels.OpenAIPromptCachingConfig{Mode: mode}},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := &model.LLMRequest{Config: &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: "shared"}, {Text: "runtime"}}}}}
+			for range 8 {
+				req.Contents = append(req.Contents, genai.NewContentFromText("history", genai.RoleUser))
+			}
+			for _, err := range llm.GenerateContent(t.Context(), req, false) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}

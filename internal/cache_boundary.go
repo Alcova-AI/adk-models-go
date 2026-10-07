@@ -9,8 +9,9 @@ import (
 )
 
 // SystemInstructionTexts returns a shared prefix and optional suffix without
-// modifying the caller's request. A nil boundary retains legacy conversion.
-func SystemInstructionTexts(req *model.LLMRequest, index *int) ([]string, error) {
+// modifying the caller's request. The separator preserves adapter-specific
+// joining within each block. A nil boundary retains legacy conversion.
+func SystemInstructionTexts(req *model.LLMRequest, index *int, separator string) ([]string, error) {
 	if index == nil {
 		return nil, nil
 	}
@@ -30,8 +31,14 @@ func SystemInstructionTexts(req *model.LLMRequest, index *int) ([]string, error)
 			return nil, fmt.Errorf("system cache boundary requires text-only parts")
 		}
 		if i <= *index {
+			if prefix.Len() > 0 {
+				prefix.WriteString(separator)
+			}
 			prefix.WriteString(part.Text)
 		} else {
+			if suffix.Len() > 0 {
+				suffix.WriteString(separator)
+			}
 			suffix.WriteString(part.Text)
 		}
 	}

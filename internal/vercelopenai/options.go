@@ -53,10 +53,10 @@ func (o Options) Apply(request *protocol.CallOptions) error {
 	if cache.Mode == adkmodels.OpenAIPromptCacheImplicit {
 		remaining--
 	}
-	if (cache.SystemInstruction != nil || cache.Tools != nil) && markSystem(request, o.SystemInstructionCacheOptions) {
+	if (cache.SystemInstruction != nil || cache.Tools != nil || len(o.SystemInstructionCacheOptions) > 0) && markSystem(request, o.SystemInstructionCacheOptions) {
 		remaining--
 	}
-	if cache.ConversationHistory != nil {
+	if cache.ConversationHistory != nil || len(o.ConversationHistoryCacheOptions) > 0 {
 		markHistory(request, remaining, o.ConversationHistoryCacheOptions)
 	}
 	return nil

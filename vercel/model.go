@@ -99,7 +99,7 @@ func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMReques
 	if err != nil {
 		return singleError(fmt.Errorf("failed to convert request: %w", err))
 	}
-	texts, err := internal.SystemInstructionTexts(req, m.config.PromptCaching.SystemInstructionPartIndex)
+	texts, err := internal.SystemInstructionTexts(req, m.config.PromptCaching.SystemInstructionPartIndex, "")
 	if err != nil {
 		return singleError(err)
 	}

@@ -524,7 +524,7 @@ func (m *anthropicModel) convertRequest(req *model.LLMRequest) (anthropic.Messag
 		}
 	}
 
-	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex)
+	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex, "")
 	if err != nil {
 		return anthropic.MessageNewParams{}, err
 	}

@@ -16,7 +16,7 @@ import (
 )
 
 func TestChatSelectedCacheBoundary(t *testing.T) {
-	index := 0
+	index := 1
 	client := sdk.NewClient(option.WithAPIKey("test"), option.WithMaxRetries(0), option.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -29,7 +29,7 @@ func TestChatSelectedCacheBoundary(t *testing.T) {
 			t.Fatal("unexpected key")
 		}
 		parts := body["messages"].([]any)[0].(map[string]any)["content"].([]any)
-		if len(parts) != 2 || parts[0].(map[string]any)["text"] != "shared" || parts[1].(map[string]any)["text"] != "variable" {
+		if len(parts) != 2 || parts[0].(map[string]any)["text"] != "# Rules\n- Answer only in English." || parts[1].(map[string]any)["text"] != "User: Alice\nDate: today" {
 			t.Fatalf("parts: %v", parts)
 		}
 		if parts[0].(map[string]any)["prompt_cache_breakpoint"].(map[string]any)["mode"] != "explicit" {
@@ -45,14 +45,14 @@ func TestChatSelectedCacheBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	index = 1 // The constructed model snapshots the selected boundary.
-	req := &model.LLMRequest{Config: &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: "shared"}, {Text: "variable"}}}}, Contents: []*genai.Content{genai.NewContentFromText("Hi", "user")}}
+	index = 0 // The constructed model snapshots the selected boundary.
+	req := &model.LLMRequest{Config: &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: "# Rules"}, {Text: "- Answer only in English."}, {Text: "User: Alice"}, {Text: "Date: today"}}}}, Contents: []*genai.Content{genai.NewContentFromText("Hi", "user")}}
 	for _, err := range llm.GenerateContent(context.Background(), req, false) {
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(req.Config.SystemInstruction.Parts) != 2 || req.Config.SystemInstruction.Parts[1].Text != "variable" {
+	if len(req.Config.SystemInstruction.Parts) != 4 || req.Config.SystemInstruction.Parts[1].Text != "- Answer only in English." {
 		t.Fatal("mutated caller request")
 	}
 }

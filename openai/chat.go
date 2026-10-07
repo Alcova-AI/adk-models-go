@@ -90,7 +90,7 @@ func (m *chatModel) generate(ctx context.Context, req *model.LLMRequest, stream 
 	if err != nil {
 		return singleErrorSequence(err)
 	}
-	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex)
+	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex, "\n")
 	if err != nil {
 		return singleErrorSequence(err)
 	}

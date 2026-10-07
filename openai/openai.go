@@ -163,7 +163,7 @@ func (m *openAIModel) convertRequest(req *model.LLMRequest) (responses.ResponseN
 	if err != nil {
 		return responses.ResponseNewParams{}, fmt.Errorf("failed to convert request: %w", err)
 	}
-	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex)
+	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex, "\n")
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
