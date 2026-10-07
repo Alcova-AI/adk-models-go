@@ -10,8 +10,6 @@
 
 ### Fixed
 
-- Preserve OpenAI system-part newlines when selecting a shared cache boundary.
-- Honour supplied native Vercel system and history cache marker maps in typed OpenAI cache modes, within the breakpoint budget.
 - Include an empty `properties` object in native Vercel function schemas with no declared properties, so zero-argument tools are accepted by the gateway.
 
 ## [v0.1.7] - Compatible models across adapters
