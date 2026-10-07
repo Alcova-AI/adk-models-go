@@ -82,3 +82,18 @@ func TestImplicitCachingLeavesThreeExplicitSlots(t *testing.T) {
 func textMessage(role, text string) protocol.Message {
 	return protocol.Message{Role: role, Content: []protocol.Part{{Type: "text", Text: text}}}
 }
+
+func TestTypedCacheSettingsConflictWithRawOptions(t *testing.T) {
+	for _, tt := range []struct {
+		key   string
+		cache adkmodels.OpenAIPromptCachingConfig
+	}{
+		{"promptCacheKey", adkmodels.OpenAIPromptCachingConfig{Key: "typed"}},
+		{"promptCacheOptions", adkmodels.OpenAIPromptCachingConfig{Mode: adkmodels.OpenAIPromptCacheExplicit}},
+	} {
+		req := protocol.CallOptions{ProviderOptions: protocol.ProviderOptions{"openai": {tt.key: "raw"}}}
+		if err := (Options{PromptCaching: tt.cache}).Apply(&req); err == nil {
+			t.Fatalf("%s silently overridden", tt.key)
+		}
+	}
+}

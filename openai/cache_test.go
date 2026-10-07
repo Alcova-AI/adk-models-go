@@ -15,6 +15,9 @@
 package adkopenai
 
 import (
+	"encoding/json"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/genai"
 	"testing"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
@@ -68,5 +71,30 @@ func TestGatewayAutomaticCachingIsConfiguredOnVercel(t *testing.T) {
 	_, err := NewModel(Config{Client: openai.NewClient(), Model: adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna", Vercel: &adkmodels.VercelConfig{Caching: adkmodels.GatewayCachingAuto}}})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSelectedSystemPartBoundary(t *testing.T) {
+	index := 1
+	m := &openAIModel{canonicalModel: "gpt-5.6-luna", requestModel: "gpt-5.6-luna", systemInstructionPartIndex: &index, promptCaching: adkmodels.OpenAIPromptCachingConfig{Mode: adkmodels.OpenAIPromptCacheExplicit, SystemInstruction: &adkmodels.OpenAICacheBreakpoint{}}}
+	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("question", genai.RoleUser)}, Config: &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: "# Rules"}, {Text: "- Answer only in English."}, {Text: "User: Alice"}, {Text: "Date: today"}}}}}
+	params, err := m.convertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err = json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	blocks := wire["input"].([]any)[0].(map[string]any)["content"].([]any)
+	if len(blocks) != 2 || blocks[0].(map[string]any)["text"] != "# Rules\n- Answer only in English." || blocks[1].(map[string]any)["text"] != "User: Alice\nDate: today" {
+		t.Fatalf("system texts: %s", raw)
+	}
+	if blocks[0].(map[string]any)["prompt_cache_breakpoint"] == nil || blocks[1].(map[string]any)["prompt_cache_breakpoint"] != nil {
+		t.Fatalf("boundary: %s", raw)
 	}
 }

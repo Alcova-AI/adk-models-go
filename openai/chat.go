@@ -25,13 +25,14 @@ import (
 )
 
 type chatModel struct {
-	client             sdk.Client
-	name, requestModel string
-	maxTokens          int
-	schemas            *toolschema.Processor
-	reasoning          reasoningConfig
-	caching            adkmodels.OpenAIPromptCachingConfig
-	vercel             *adkmodels.VercelConfig
+	client                     sdk.Client
+	name, requestModel         string
+	maxTokens                  int
+	schemas                    *toolschema.Processor
+	reasoning                  reasoningConfig
+	caching                    adkmodels.OpenAIPromptCachingConfig
+	vercel                     *adkmodels.VercelConfig
+	systemInstructionPartIndex *int
 }
 
 func newChatModel(cfg Config) (model.LLM, error) {
@@ -55,8 +56,8 @@ func newChatModel(cfg Config) (model.LLM, error) {
 	if err := cache.Validate(); err != nil {
 		return nil, err
 	}
-	if cache.Mode != adkmodels.OpenAIPromptCacheProviderDefault || cache.SystemInstruction != nil || cache.Tools != nil || cache.ConversationHistory != nil {
-		return nil, fmt.Errorf("openai chat: explicit cache modes and breakpoints are unsupported")
+	if f != family.OpenAI && (cache.Mode != adkmodels.OpenAIPromptCacheProviderDefault || cache.SystemInstruction != nil || cache.Tools != nil || cache.ConversationHistory != nil) {
+		return nil, fmt.Errorf("openai chat: typed cache controls require an OpenAI model")
 	}
 	if f != family.OpenAI && cache.Key != "" {
 		return nil, fmt.Errorf("openai chat: OpenAI cache keys require an OpenAI model")
@@ -75,7 +76,7 @@ func newChatModel(cfg Config) (model.LLM, error) {
 	}
 	return &chatModel{client: cfg.Client, name: cfg.Model.CanonicalModel, requestModel: requestModel, maxTokens: tokens,
 		schemas:   toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
-		reasoning: reasoningConfig{DefaultLevel: cfg.Model.Reasoning.DefaultLevel, Family: f}, caching: cache, vercel: gateway.CloneConfig(cfg.Model.Vercel)}, nil
+		reasoning: reasoningConfig{DefaultLevel: cfg.Model.Reasoning.DefaultLevel, Family: f}, caching: cache, vercel: gateway.CloneConfig(cfg.Model.Vercel), systemInstructionPartIndex: cfg.Model.PromptCaching.SystemInstructionPartIndex}, nil
 }
 
 func (m *chatModel) Name() string { return m.name }
@@ -89,6 +90,18 @@ func (m *chatModel) generate(ctx context.Context, req *model.LLMRequest, stream 
 	if err != nil {
 		return singleErrorSequence(err)
 	}
+	texts, err := internal.SystemInstructionTexts(req, m.systemInstructionPartIndex, "\n")
+	if err != nil {
+		return singleErrorSequence(err)
+	}
+	if len(texts) > 0 {
+		parts := make([]sdk.ChatCompletionContentPartTextParam, 0, len(texts))
+		for _, text := range texts {
+			parts = append(parts, *sdk.TextContentPart(text).OfText)
+		}
+		params.Messages[0] = sdk.SystemMessage(parts)
+	}
+	applyChatPromptCaching(&params, m.caching, m.systemInstructionPartIndex != nil)
 	prepared, err := m.schemas.Prepare(ctx, toolschema.Tools(req))
 	if err != nil {
 		return singleErrorSequence(err)

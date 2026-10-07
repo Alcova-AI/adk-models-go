@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.1.8] - Native Vercel tool schemas and prompt cache boundaries
+
+### Added
+
+- Expose native Vercel tool-input decode failures as typed errors retaining exact arguments for private diagnostics, without including arguments in ordinary error messages.
+- Select a shared system-prefix boundary by GenAI part index for OpenAI Responses and Chat Completions, Anthropic Messages and native Vercel. Omitted selectors preserve existing conversion and breakpoint placement.
+- Pass native Vercel cache settings through provider options and supply exact system and history marker namespaces, including Azure. Reject conflicting typed OpenAI cache settings.
+
+### Fixed
+
+- Include an empty `properties` object in native Vercel function schemas with no declared properties, so zero-argument tools are accepted by the gateway.
+
 ## [v0.1.7] - Compatible models across adapters
 
 ### Added

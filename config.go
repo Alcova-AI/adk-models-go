@@ -33,6 +33,9 @@ type ModelConfig struct {
 // Validate checks identity and explicitly supplied settings. Endpoint support is
 // left to the provider; the library does not maintain a model catalogue.
 func (c ModelConfig) Validate() error {
+	if c.PromptCaching.SystemInstructionPartIndex != nil && *c.PromptCaching.SystemInstructionPartIndex < 0 {
+		return fmt.Errorf("system cache part index must be non-negative")
+	}
 	f, err := family.Detect(c.CanonicalModel)
 	if err != nil {
 		return err
@@ -101,8 +104,11 @@ func (c OpenAIReasoningConfig) Validate() error {
 }
 
 type PromptCachingConfig struct {
-	Anthropic AnthropicPromptCachingConfig
-	OpenAI    OpenAIPromptCachingConfig
+	// SystemInstructionPartIndex selects the final zero-based GenAI system part
+	// included in the shared prefix. Nil preserves each adapter's legacy boundary.
+	SystemInstructionPartIndex *int
+	Anthropic                  AnthropicPromptCachingConfig
+	OpenAI                     OpenAIPromptCachingConfig
 }
 
 type AnthropicPromptCacheMode uint8

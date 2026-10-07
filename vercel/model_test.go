@@ -4,14 +4,17 @@
 package adkvercel
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
+	"github.com/Alcova-AI/adk-models-go/toolschema"
 
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -355,6 +358,199 @@ func TestOpenAIStructuredSchemaIsStrictWithoutMutatingCaller(t *testing.T) {
 			}
 			if string(before) != string(after) {
 				t.Fatal("caller schema changed")
+			}
+		})
+	}
+}
+
+func TestGenerateZeroArgumentToolSchema(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		declaration *genai.FunctionDeclaration
+	}{
+		{"typed", &genai.FunctionDeclaration{Name: "list_skills", Parameters: &genai.Schema{Type: genai.TypeObject}}},
+		{"raw", &genai.FunctionDeclaration{Name: "list_skills", ParametersJsonSchema: json.RawMessage(`{"type":"object"}`)}},
+		{"explicit", &genai.FunctionDeclaration{Name: "list_skills", ParametersJsonSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}},
+		{"omitted", &genai.FunctionDeclaration{Name: "list_skills"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				var body protocol.CallOptions
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if len(body.Tools) != 1 || body.Tools[0].Name != "list_skills" {
+					t.Fatalf("tools = %#v", body.Tools)
+				}
+				properties, ok := body.Tools[0].InputSchema["properties"].(map[string]any)
+				if !ok || len(properties) != 0 {
+					t.Fatalf("zero-argument schema = %#v", body.Tools[0].InputSchema)
+				}
+				return jsonResponse(req, `{"content":[{"type":"text","text":"OK"}],"finishReason":{"unified":"stop","raw":"stop"}}`), nil
+			})
+			llm, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: transport}, Model: adkmodels.ModelConfig{
+				CanonicalModel: "gpt-5.6-luna", RequestModel: "openai/gpt-5.6-luna",
+				ToolSchemas: toolschema.Config{AllowUnsupported: true, Warn: func(context.Context, toolschema.Warning) {}},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("List skills", genai.RoleUser)}, Config: &genai.GenerateContentConfig{
+				Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{tt.declaration}}},
+			}}
+			for _, err := range llm.GenerateContent(t.Context(), req, false) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if calls != 1 {
+				t.Fatalf("HTTP calls = %d", calls)
+			}
+		})
+	}
+}
+
+func TestSelectedSystemCacheBoundaryUsesSuppliedNamespaces(t *testing.T) {
+	for _, index := range []int{0, 1} {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("question", genai.RoleUser)}, Config: &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: "shared"}, {Text: "dynamic"}}}}}
+			calls := 0
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				var body protocol.CallOptions
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				want := "shared"
+				if index == 1 {
+					want = "shareddynamic"
+				}
+				if body.Prompt[0].Content != want {
+					t.Fatalf("prefix = %#v", body.Prompt[0])
+				}
+				for _, ns := range []string{"azure", "openai"} {
+					if !reflect.DeepEqual(body.Prompt[0].ProviderOptions[ns]["promptCacheBreakpoint"], map[string]any{"mode": "explicit"}) {
+						t.Fatalf("missing %s marker: %#v", ns, body.Prompt[0])
+					}
+					if body.ProviderOptions[ns]["promptCacheOptions"] == nil {
+						t.Fatalf("missing %s request settings", ns)
+					}
+				}
+				if len(body.Prompt[1].ProviderOptions) != 0 {
+					t.Fatal("suffix was marked")
+				}
+				return jsonResponse(r, `{"content":[{"type":"text","text":"OK"}],"finishReason":{"unified":"stop"}}`), nil
+			})
+			m, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: transport}, Model: adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna", RequestModel: "openai/gpt-5.6-luna", PromptCaching: adkmodels.PromptCachingConfig{SystemInstructionPartIndex: &index}, Vercel: &adkmodels.VercelConfig{
+				ProviderOptions:               map[string]map[string]any{"azure": {"promptCacheOptions": map[string]any{"mode": "explicit", "ttl": "30m"}}, "openai": {"promptCacheOptions": map[string]any{"mode": "explicit", "ttl": "30m"}}},
+				SystemInstructionCacheOptions: map[string]map[string]any{"azure": {"promptCacheBreakpoint": map[string]any{"mode": "explicit"}}, "openai": {"promptCacheBreakpoint": map[string]any{"mode": "explicit"}}},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, err := range m.GenerateContent(t.Context(), req, false) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if calls != 1 || len(req.Config.SystemInstruction.Parts) != 2 || req.Config.SystemInstruction.Parts[0].Text != "shared" {
+				t.Fatal("request mutated or not sent")
+			}
+		})
+	}
+}
+
+func TestNativeAnthropicSuppliedCacheMarkers(t *testing.T) {
+	index := 0
+	markers := map[string]map[string]any{"anthropic": {"cacheControl": map[string]any{"type": "ephemeral", "ttl": "1h"}}}
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		prompt := body["prompt"].([]any)
+		if !reflect.DeepEqual(prompt[0].(map[string]any)["providerOptions"], map[string]any{"anthropic": map[string]any{"cacheControl": map[string]any{"type": "ephemeral", "ttl": "1h"}}}) {
+			t.Fatalf("system marker = %#v", prompt[0])
+		}
+		if _, marked := prompt[1].(map[string]any)["providerOptions"]; marked {
+			t.Fatal("dynamic suffix marked")
+		}
+		part := prompt[2].(map[string]any)["content"].([]any)[0].(map[string]any)
+		if part["providerOptions"] == nil {
+			t.Fatal("history marker dropped")
+		}
+		return jsonResponse(r, `{"content":[{"type":"text","text":"OK"}],"finishReason":{"unified":"stop"}}`), nil
+	})
+	m, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: transport}, Model: adkmodels.ModelConfig{CanonicalModel: "claude-sonnet-4-6", RequestModel: "anthropic/claude-sonnet-4-6", PromptCaching: adkmodels.PromptCachingConfig{SystemInstructionPartIndex: &index}, Vercel: &adkmodels.VercelConfig{SystemInstructionCacheOptions: markers, ConversationHistoryCacheOptions: markers}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	markers["anthropic"]["cacheControl"].(map[string]any)["ttl"] = "5m"
+	index = 1
+	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("question", genai.RoleUser)}, Config: &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: "shared"}, {Text: "dynamic"}}}}}
+	for _, err := range m.GenerateContent(t.Context(), req, false) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestTypedCacheModesPreserveNativeMarkerMaps(t *testing.T) {
+	for _, mode := range []adkmodels.OpenAIPromptCacheMode{adkmodels.OpenAIPromptCacheImplicit, adkmodels.OpenAIPromptCacheExplicit} {
+		t.Run(string(mode), func(t *testing.T) {
+			index := 0
+			marker := map[string]map[string]any{"azure": {"promptCacheBreakpoint": map[string]any{"mode": "explicit"}}}
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				prompt := body["prompt"].([]any)
+				shared := prompt[0].(map[string]any)
+				if shared["content"] != "shared" || !reflect.DeepEqual(shared["providerOptions"], map[string]any{"azure": map[string]any{"promptCacheBreakpoint": map[string]any{"mode": "explicit"}}}) {
+					t.Fatalf("shared marker: %#v", shared)
+				}
+				if runtime := prompt[1].(map[string]any); runtime["providerOptions"] != nil {
+					t.Fatalf("runtime suffix marked: %#v", runtime)
+				}
+				count := 1
+				for _, message := range prompt[2:] {
+					for _, part := range message.(map[string]any)["content"].([]any) {
+						if options := part.(map[string]any)["providerOptions"]; options != nil {
+							if !reflect.DeepEqual(options, shared["providerOptions"]) {
+								t.Fatalf("history marker: %#v", options)
+							}
+							count++
+						}
+					}
+				}
+				want := 4
+				if mode == adkmodels.OpenAIPromptCacheImplicit {
+					want = 3
+				}
+				if count != want {
+					t.Fatalf("markers = %d, want %d", count, want)
+				}
+				return jsonResponse(request, `{"content":[{"type":"text","text":"OK"}],"finishReason":{"unified":"stop","raw":"stop"}}`), nil
+			})
+			llm, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: transport}, Model: adkmodels.ModelConfig{
+				CanonicalModel: "gpt-5.6-luna", RequestModel: "openai/gpt-5.6-luna",
+				Vercel:        &adkmodels.VercelConfig{SystemInstructionCacheOptions: marker, ConversationHistoryCacheOptions: marker},
+				PromptCaching: adkmodels.PromptCachingConfig{SystemInstructionPartIndex: &index, OpenAI: adkmodels.OpenAIPromptCachingConfig{Mode: mode}},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := &model.LLMRequest{Config: &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: "shared"}, {Text: "runtime"}}}}}
+			for range 8 {
+				req.Contents = append(req.Contents, genai.NewContentFromText("history", genai.RoleUser))
+			}
+			for _, err := range llm.GenerateContent(t.Context(), req, false) {
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
 	}

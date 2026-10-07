@@ -24,19 +24,23 @@ import (
 
 // TestChatLiveMatrix is deliberately opt-in even when credentials exist. It
 // sends synthetic inputs only, disables retries and bounds request count/output.
-// ADK_CHAT_LIVE_ROUTE can select direct, vercel-openai or vercel-google.
+// ADK_CHAT_LIVE_ROUTE can select direct, vercel-openai, vercel-azure or vercel-google.
 func TestChatLiveMatrix(t *testing.T) {
 	if os.Getenv("ADK_CHAT_LIVE") != "1" {
 		t.Skip("set ADK_CHAT_LIVE=1 to spend up to USD 0.10 on synthetic live checks")
 	}
 	var calls int
 	var reserved, estimated float64
-	for _, route := range []string{"direct", "vercel-openai", "vercel-google"} {
+	for _, route := range []string{"direct", "vercel-openai", "vercel-azure", "vercel-google"} {
 		if selected := os.Getenv("ADK_CHAT_LIVE_ROUTE"); selected != "" && selected != route {
 			continue
 		}
 		if !t.Run(route, func(t *testing.T) {
 			name, wire, key, base := "gpt-6-luna", "gpt-6-luna", os.Getenv("OPENAI_API_KEY"), "https://api.openai.com/v1"
+			if requested := os.Getenv("ADK_CHAT_LIVE_MODEL"); requested != "" {
+				name = requested
+				wire = name
+			}
 			inputRate, outputRate := 0.000000125, 0.0000005 // conservative cache-write input rate
 			var gateway *adkmodels.VercelConfig
 			level := genai.ThinkingLevelMinimal
@@ -45,6 +49,9 @@ func TestChatLiveMatrix(t *testing.T) {
 				base = "https://ai-gateway.vercel.sh/v1"
 				wire = "openai/" + name
 				gateway = &adkmodels.VercelConfig{Only: []string{"openai"}, ZeroDataRetention: true}
+			}
+			if route == "vercel-azure" {
+				gateway.Only = []string{"azure"}
 			}
 			if route == "vercel-google" {
 				name = "gemini-3.1-flash-lite"
@@ -77,7 +84,7 @@ func TestChatLiveMatrix(t *testing.T) {
 				}
 				// Fixtures contain under 5,000 input tokens including the tiny image.
 				bound := 5000*inputRate + float64(limit)*outputRate
-				if calls >= 40 || reserved+bound > 0.10 {
+				if calls >= 64 || reserved+bound > 0.10 {
 					t.Fatal("live test budget exhausted")
 				}
 				reserved += bound
@@ -221,6 +228,44 @@ func TestChatLiveMatrix(t *testing.T) {
 				}
 			}) {
 				t.FailNow()
+			}
+			if route == "direct" || (route != "vercel-google" && os.Getenv("ADK_CHAT_LIVE_CACHE_PROBE") == "1") {
+				if !t.Run("cache-boundary", func(t *testing.T) {
+					index := 0
+					makeCached := func(mode adkmodels.OpenAIPromptCacheMode) model.LLM {
+						m, err := NewModel(Config{API: APIChatCompletions, Client: client, Model: adkmodels.ModelConfig{CanonicalModel: name, RequestModel: wire, DefaultMaxOutputTokens: 64, Reasoning: adkmodels.ReasoningConfig{DefaultLevel: level}, Vercel: gateway, PromptCaching: adkmodels.PromptCachingConfig{SystemInstructionPartIndex: &index, OpenAI: adkmodels.OpenAIPromptCachingConfig{Mode: mode, SystemInstruction: &adkmodels.OpenAICacheBreakpoint{}}}}})
+						if err != nil {
+							t.Fatal(err)
+						}
+						return m
+					}
+					shared := fmt.Sprintf("Synthetic cache run %d. ", time.Now().UnixNano()) + strings.Repeat("Shared fictional instruction context. ", 400)
+					r := &model.LLMRequest{Config: &genai.GenerateContentConfig{MaxOutputTokens: 64, SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: shared}, {Text: "Synthetic user context A."}}}}, Contents: []*genai.Content{genai.NewContentFromText("Reply only OK.", genai.RoleUser)}}
+					explicit := makeCached(adkmodels.OpenAIPromptCacheExplicit)
+					first := invoke(t, explicit, r, false)
+					r.Config.SystemInstruction.Parts[1].Text = "Different synthetic user context B."
+					r.Contents[0] = genai.NewContentFromText("A different question. Reply only OK.", genai.RoleUser)
+					second := invoke(t, explicit, r, true)
+					if second.UsageMetadata.CachedContentTokenCount < first.UsageMetadata.PromptTokenCount-256 {
+						t.Fatalf("explicit shared prefix not reused: input=%d cached=%d", first.UsageMetadata.PromptTokenCount, second.UsageMetadata.CachedContentTokenCount)
+					}
+					implicit := makeCached(adkmodels.OpenAIPromptCacheImplicit)
+					r.Contents = []*genai.Content{genai.NewContentFromText(strings.Repeat("Fictional discussion history entry. ", 250)+"Reply only OK.", genai.RoleUser)}
+					history := invoke(t, implicit, r, false)
+					r.Contents = append(r.Contents, history.Content, genai.NewContentFromText("Continue. Reply only OK.", genai.RoleUser))
+					appended := invoke(t, implicit, r, true)
+					if appended.UsageMetadata.CachedContentTokenCount < history.UsageMetadata.PromptTokenCount-128 {
+						t.Fatalf("appended history not reused: input=%d cached=%d", history.UsageMetadata.PromptTokenCount, appended.UsageMetadata.CachedContentTokenCount)
+					}
+					r.Contents = []*genai.Content{genai.NewContentFromText("Unrelated new conversation. Reply only OK.", genai.RoleUser)}
+					fresh := invoke(t, implicit, r, false)
+					if appended.UsageMetadata.CachedContentTokenCount < fresh.UsageMetadata.CachedContentTokenCount+500 {
+						t.Fatal("cache hits did not include conversation history")
+					}
+					t.Logf("shared_cached=%d history_cached=%d fresh_cached=%d", second.UsageMetadata.CachedContentTokenCount, appended.UsageMetadata.CachedContentTokenCount, fresh.UsageMetadata.CachedContentTokenCount)
+				}) {
+					t.FailNow()
+				}
 			}
 			if route != "vercel-google" {
 				if !t.Run("responses-regression", func(t *testing.T) {

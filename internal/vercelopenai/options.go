@@ -6,13 +6,16 @@
 package openai
 
 import (
+	"fmt"
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 
 	"github.com/Alcova-AI/adk-models-go/internal/protocol"
 )
 
 type Options struct {
-	PromptCaching adkmodels.OpenAIPromptCachingConfig
+	PromptCaching                   adkmodels.OpenAIPromptCachingConfig
+	SystemInstructionCacheOptions   protocol.ProviderOptions
+	ConversationHistoryCacheOptions protocol.ProviderOptions
 }
 
 func (o Options) Apply(request *protocol.CallOptions) error {
@@ -23,42 +26,54 @@ func (o Options) Apply(request *protocol.CallOptions) error {
 	openAI := cloneValues(request.ProviderOptions["openai"])
 	cache := o.PromptCaching
 	if cache.Key != "" {
+		if _, exists := openAI["promptCacheKey"]; exists {
+			return fmt.Errorf("openai.promptCacheKey conflicts with typed caching")
+		}
 		openAI["promptCacheKey"] = cache.Key
 	}
 	if cache.Mode != adkmodels.OpenAIPromptCacheProviderDefault {
+		if _, exists := openAI["promptCacheOptions"]; exists {
+			return fmt.Errorf("openai.promptCacheOptions conflicts with typed caching")
+		}
 		openAI["promptCacheOptions"] = map[string]any{"mode": string(cache.Mode), "ttl": "30m"}
 	}
 	if len(openAI) > 0 {
 		request.ProviderOptions["openai"] = openAI
 	}
 	if cache.Mode == adkmodels.OpenAIPromptCacheProviderDefault {
+		if len(o.SystemInstructionCacheOptions) > 0 {
+			markSystem(request, o.SystemInstructionCacheOptions)
+		}
+		if len(o.ConversationHistoryCacheOptions) > 0 {
+			markHistory(request, 2, o.ConversationHistoryCacheOptions)
+		}
 		return nil
 	}
 	remaining := 4
 	if cache.Mode == adkmodels.OpenAIPromptCacheImplicit {
 		remaining--
 	}
-	if (cache.SystemInstruction != nil || cache.Tools != nil) && markSystem(request) {
+	if (cache.SystemInstruction != nil || cache.Tools != nil || len(o.SystemInstructionCacheOptions) > 0) && markSystem(request, o.SystemInstructionCacheOptions) {
 		remaining--
 	}
-	if cache.ConversationHistory != nil {
-		markHistory(request, remaining)
+	if cache.ConversationHistory != nil || len(o.ConversationHistoryCacheOptions) > 0 {
+		markHistory(request, remaining, o.ConversationHistoryCacheOptions)
 	}
 	return nil
 }
 
-func markSystem(request *protocol.CallOptions) bool {
+func markSystem(request *protocol.CallOptions, options protocol.ProviderOptions) bool {
 	for i := range request.Prompt {
 		if request.Prompt[i].Role != "system" {
 			continue
 		}
-		request.Prompt[i].ProviderOptions = breakpointOptions(request.Prompt[i].ProviderOptions)
+		request.Prompt[i].ProviderOptions = mergeBreakpointOptions(request.Prompt[i].ProviderOptions, options)
 		return true
 	}
 	return false
 }
 
-func markHistory(request *protocol.CallOptions, limit int) int {
+func markHistory(request *protocol.CallOptions, limit int, options protocol.ProviderOptions) int {
 	marked := 0
 	for i := len(request.Prompt) - 1; i >= 0 && marked < limit; i-- {
 		message := &request.Prompt[i]
@@ -73,7 +88,7 @@ func markHistory(request *protocol.CallOptions, limit int) int {
 			if parts[j].Type != "text" {
 				continue
 			}
-			parts[j].ProviderOptions = breakpointOptions(parts[j].ProviderOptions)
+			parts[j].ProviderOptions = mergeBreakpointOptions(parts[j].ProviderOptions, options)
 			message.Content = parts
 			marked++
 			break
@@ -89,6 +104,21 @@ func hasFile(parts []protocol.Part) bool {
 		}
 	}
 	return false
+}
+
+func mergeBreakpointOptions(source, options protocol.ProviderOptions) protocol.ProviderOptions {
+	if len(options) == 0 {
+		return breakpointOptions(source)
+	}
+	result := cloneOptions(source)
+	for namespace, values := range options {
+		merged := cloneValues(result[namespace])
+		for key, value := range values {
+			merged[key] = value
+		}
+		result[namespace] = merged
+	}
+	return result
 }
 
 func breakpointOptions(source protocol.ProviderOptions) protocol.ProviderOptions {

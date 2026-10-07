@@ -50,6 +50,9 @@ func NewModel(cfg Config) (model.LLM, error) {
 		return nil, err
 	}
 	cfg.Model.Vercel = gateway.CloneConfig(cfg.Model.Vercel)
+	if cfg.Model.PromptCaching.SystemInstructionPartIndex != nil {
+		cfg.Model.PromptCaching.SystemInstructionPartIndex = new(*cfg.Model.PromptCaching.SystemInstructionPartIndex)
+	}
 	f, err := family.Detect(cfg.Model.CanonicalModel)
 	if err != nil {
 		return nil, err
@@ -96,8 +99,26 @@ func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMReques
 	if err != nil {
 		return singleError(fmt.Errorf("failed to convert request: %w", err))
 	}
+	texts, err := internal.SystemInstructionTexts(req, m.config.PromptCaching.SystemInstructionPartIndex, "")
+	if err != nil {
+		return singleError(err)
+	}
+	if len(texts) > 0 {
+		messages := make([]protocol.Message, 0, len(options.Prompt)+1)
+		for _, text := range texts {
+			messages = append(messages, protocol.Message{Role: "system", Content: text})
+		}
+		options.Prompt = append(messages, options.Prompt[1:]...)
+	}
 	for i := range options.Tools {
 		schema := prepared[options.Tools[i].Name]
+		// The native gateway requires properties even for zero-argument tools.
+		// An empty properties map does not change JSON Schema validation.
+		if schema.Schema["type"] == "object" {
+			if _, exists := schema.Schema["properties"]; !exists {
+				schema.Schema["properties"] = map[string]any{}
+			}
+		}
 		options.Tools[i].InputSchema = schema.Schema
 		options.Tools[i].Strict = schema.Strict
 	}
@@ -124,7 +145,13 @@ func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMReques
 		if options.ResponseFormat != nil {
 			jsonschema.EnforceOpenAI(options.ResponseFormat["schema"])
 		}
-		cache := vercelopenai.Options{PromptCaching: m.config.PromptCaching.OpenAI}
+		cache := vercelopenai.Options{PromptCaching: m.config.PromptCaching.OpenAI, SystemInstructionCacheOptions: cfg.SystemInstructionCacheOptions, ConversationHistoryCacheOptions: cfg.ConversationHistoryCacheOptions}
+		if err := cache.Apply(&options); err != nil {
+			return singleError(err)
+		}
+	}
+	if m.family != family.OpenAI {
+		cache := vercelopenai.Options{SystemInstructionCacheOptions: cfg.SystemInstructionCacheOptions, ConversationHistoryCacheOptions: cfg.ConversationHistoryCacheOptions}
 		if err := cache.Apply(&options); err != nil {
 			return singleError(err)
 		}

@@ -75,7 +75,7 @@ func convertOutputPart(output protocol.OutputPart, includeThoughts bool) (*genai
 		args := map[string]any{}
 		if output.Input != "" {
 			if err := json.Unmarshal([]byte(output.Input), &args); err != nil {
-				return nil, fmt.Errorf("vercel: parse tool call %q input: %w", output.ToolName, err)
+				return nil, &ToolInputError{ToolCallID: output.ToolCallID, ToolName: output.ToolName, RawInput: output.Input, Err: err}
 			}
 		}
 		return &genai.Part{FunctionCall: &genai.FunctionCall{ID: output.ToolCallID, Name: output.ToolName, Args: args}}, nil
