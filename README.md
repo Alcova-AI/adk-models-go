@@ -298,18 +298,36 @@ retention and provider reasoning options remain available.
 
 ## Prompt caching
 
-Caching controls are unset by default. Providers may still cache on their own. [Unmapped models](#unmapped-models) require provider-default caching and reject typed cache controls.
+Prompt caching lets a provider reuse the unchanged start of a request. You can
+leave caching settings unset to use the provider's defaults, or configure them
+through `ModelConfig.PromptCaching`.
 
-Set caching through `ModelConfig.PromptCaching`:
+| Adapter | Settings |
+| --- | --- |
+| Anthropic Messages | Set `Anthropic.Mode` to `AnthropicPromptCacheManual` and choose breakpoints and their lifetimes. |
+| OpenAI Responses | Set `OpenAI.Mode` to implicit or explicit caching. Cache keys and breakpoints are optional. |
+| OpenAI Chat Completions | Use the same OpenAI settings with supported models, including GPT-5.6 and later. |
+| Native Vercel | Set `VercelConfig.Caching` to `GatewayCachingAuto` for gateway-managed caching. |
 
-- **Anthropic**: set `Anthropic.Mode` to `AnthropicPromptCacheManual`, then set breakpoints with their lifetimes.
-- **OpenAI Responses**: set `OpenAI.Mode` to implicit or explicit, with an optional cache key and breakpoints.
-- **OpenAI Chat Completions**: supports implicit or explicit cache mode, an optional cache key and text breakpoints for supported OpenAI models (GPT-5.6 and later). Shared-prefix cache reuse is verified with direct OpenAI Chat Completions. For requests through Vercel AI Gateway, use native Vercel; shared-prefix cache reuse through Vercel’s Chat compatibility endpoint is not verified.
-- **Vercel**: set `VercelConfig.Caching` to `GatewayCachingAuto` for gateway-managed caching. Native requests also accept exact request-level cache settings in `VercelConfig.ProviderOptions` and exact marker maps in `SystemInstructionCacheOptions` and `ConversationHistoryCacheOptions`. Supplied markers replace generated markers; typed and raw OpenAI request cache settings must not conflict.
+A breakpoint tells the provider where reusable content ends. To share cached
+instructions across requests, put shared text before variable context and set
+`PromptCaching.SystemInstructionPartIndex` to the last shared system part
+(counting from zero). The adapter keeps the variable suffix outside that
+breakpoint. If you omit the index, the adapter uses its default placement.
 
-Set optional `PromptCaching.SystemInstructionPartIndex` to the zero-based GenAI system part where the shared prefix ends. OpenAI Responses, OpenAI Chat Completions and Anthropic Messages mark the selected prefix; native Vercel emits a separate system message before the variable suffix and copies the supplied marker map onto that message. Omit the index to retain legacy conversion and breakpoint placement. Invalid, empty or non-text selected boundaries return an error.
+For OpenAI requests through Vercel AI Gateway, choose the native Vercel adapter
+when you need shared-prefix caching. Direct OpenAI Chat Completions also supports
+this use. Shared-prefix cache reuse through Vercel's Chat compatibility endpoint
+has not been verified.
 
-Cache support depends on the adapter and model family. Conflicting configuration is an error. The library does not strip settings and retry after a provider rejects a request.
+For provider-specific native Vercel settings, use `VercelConfig.ProviderOptions`.
+You can supply system and history breakpoint options through
+`SystemInstructionCacheOptions` and `ConversationHistoryCacheOptions`; these
+replace the generated options.
+
+Cache support depends on the provider and model. [Unmapped models](#unmapped-models)
+use provider-default caching. The library reports invalid boundaries, conflicting
+settings and provider errors so you can correct the configuration.
 
 ---
 
