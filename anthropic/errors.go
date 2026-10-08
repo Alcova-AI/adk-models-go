@@ -15,7 +15,10 @@
 package adkanthropic
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"google.golang.org/genai"
@@ -23,10 +26,10 @@ import (
 	converters "github.com/Alcova-AI/adk-models-go/internal/anthropicconvert"
 )
 
-// OutputInterruptedError reports that the model's output was cut off before
-// the response could complete — typically because generation hit the
-// max_tokens ceiling partway through a tool call, leaving its input JSON
-// incomplete. The adapter detects the interruption and preserves everything
+// OutputInterruptedError reports unusable tool input or interrupted output.
+// FailureReason distinguishes malformed input from a provider token limit or
+// an interrupted stream. Invalid JSON alone does not establish truncation.
+// The adapter detects the failure and preserves everything
 // that survived; it makes no decision about how to continue. Callers own
 // that policy: inspect the salvaged content with errors.As and decide
 // whether to discard it, persist it into history with a notice, or resume
@@ -40,20 +43,18 @@ type OutputInterruptedError struct {
 	// Parts holds the salvaged content that survived intact, converted to
 	// genai parts in stream order: signed or redacted provider-state thoughts,
 	// visible thoughts when requested, and any completed text or tool-call
-	// parts. The truncated tool call is NOT included here — it is exposed as
+	// parts. The unusable tool call is NOT included here — it is exposed as
 	// data via ToolName/PartialInput.
 	Parts []*genai.Part
 
-	// ToolName is the name of the tool call whose input was cut off, if the
-	// interruption landed inside a tool call. Empty when the cut landed
-	// elsewhere (e.g. mid-thinking).
+	// ToolName is the name of the tool call with invalid or incomplete input.
+	// Empty when the failure landed elsewhere (e.g. mid-thinking).
 	ToolName string
 
-	// ToolID is the provider-assigned id of the truncated tool call, if any.
+	// ToolID is the provider-assigned id of the unusable tool call, if any.
 	ToolID string
 
-	// PartialInput is the raw, incomplete input JSON accumulated for the
-	// truncated tool call before the cut. It is not valid JSON.
+	// PartialInput is the raw, invalid input JSON accumulated for the tool call. It is not valid JSON.
 	PartialInput string
 
 	// Cause is the underlying error that surfaced the interruption, if any
@@ -63,15 +64,30 @@ type OutputInterruptedError struct {
 }
 
 func (e *OutputInterruptedError) Error() string {
-	switch {
-	case e.ToolName != "":
-		return fmt.Sprintf("model output interrupted (stop_reason=%s): tool call %q truncated after %d bytes of input", e.StopReason, e.ToolName, len(e.PartialInput))
-	default:
-		return fmt.Sprintf("model output interrupted (stop_reason=%s)", e.StopReason)
+	message := fmt.Sprintf("model output failure (reason=%s, stop_reason=%s)", e.FailureReason(), e.StopReason)
+	if e.ToolName != "" {
+		message += fmt.Sprintf(": tool call %q has %d bytes of unusable input", e.ToolName, len(e.PartialInput))
 	}
+	if e.Cause != nil {
+		message += ": " + e.Cause.Error()
+	}
+	return message
 }
 
 func (e *OutputInterruptedError) Unwrap() error { return e.Cause }
+
+// FailureReason uses the provider's terminal reason, never the JSON length.
+// An absent terminal reason means stream completion was not observed.
+func (e *OutputInterruptedError) FailureReason() string {
+	switch e.StopReason {
+	case anthropic.StopReasonMaxTokens:
+		return "max_tokens"
+	case "":
+		return "stream_interrupted"
+	default:
+		return "invalid_tool_input"
+	}
+}
 
 // newOutputInterruptedError builds an OutputInterruptedError from an
 // interrupted message, salvaging the intact content blocks and the truncated
@@ -87,6 +103,19 @@ func newOutputInterruptedError(msg *anthropic.Message, cause error, includeThoug
 	var stopReason anthropic.StopReason
 	if msg != nil {
 		stopReason = msg.StopReason
+	}
+	if stopReason == "" && cause == nil {
+		cause = io.ErrUnexpectedEOF
+	}
+	if salvaged.PartialInput != "" {
+		var input any
+		if inputErr := json.Unmarshal([]byte(salvaged.PartialInput), &input); inputErr != nil {
+			var syntaxErr *json.SyntaxError
+			if errors.As(inputErr, &syntaxErr) {
+				inputErr = fmt.Errorf("tool input JSON at byte %d: %w", syntaxErr.Offset, inputErr)
+			}
+			cause = errors.Join(cause, inputErr)
+		}
 	}
 
 	return &OutputInterruptedError{

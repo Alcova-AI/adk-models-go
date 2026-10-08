@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -701,4 +702,164 @@ func TestSleepWithContext(t *testing.T) {
 			t.Errorf("err = %v, want nil", err)
 		}
 	})
+}
+
+// The success and token-limit streams were captured from Haiku 5.5 through
+// Vercel Messages on 8 October 2026. IDs are normalised and gateway metadata
+// removed. The damaged cases below are controlled changes to captured bytes,
+// not claims that these modified streams were returned by the provider.
+func TestGenerateStream_CapturedHaikuOutputFailures(t *testing.T) {
+	limited, err := os.ReadFile("testdata/haiku55-token-limit.sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	successful, err := os.ReadFile("testdata/haiku55-xhigh-success.sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	damaged := strings.Replace(string(successful), `"partial_json":"\"}"`, `"partial_json":"\"}}"`, 1)
+	if damaged == string(successful) {
+		t.Fatal("fixture mutation missed tool input")
+	}
+	prefix := string(limited)
+	cut := strings.Index(prefix, "event: content_block_stop")
+	if cut < 0 {
+		cut = strings.Index(prefix, "event: message_delta")
+	}
+	if cut < 0 {
+		t.Fatal("captured stream has no terminal event")
+	}
+	for _, tc := range []struct {
+		name, body, want string
+		success          bool
+	}{
+		{"real XHigh success", string(successful), "", true},
+		{"real max_tokens", string(limited), "reason=max_tokens", false},
+		{"malformed finished input", damaged, "reason=invalid_tool_input", false},
+		{"connection closes mid input", prefix[:cut], "reason=stream_interrupted", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, requests := newSSEServer(t, tc.body)
+			m, sleeps := newStreamTestModel(t, srv.URL)
+			pairs := collect(t.Context(), m)
+			var final *model.LLMResponse
+			var failure error
+			for _, pair := range pairs {
+				if pair.err != nil {
+					failure = pair.err
+				}
+				if pair.resp != nil && !pair.resp.Partial {
+					final = pair.resp
+				}
+			}
+			if tc.success {
+				if failure != nil || final == nil || final.Content == nil {
+					t.Fatalf("successful provider tool call lost: %v", failure)
+				}
+				var got *genai.FunctionCall
+				for _, part := range final.Content.Parts {
+					if part.FunctionCall != nil {
+						got = part.FunctionCall
+					}
+				}
+				if got == nil || got.Name != "write_file" || got.Args["content"] != "Hello" {
+					t.Fatalf("tool call changed: %+v", got)
+				}
+			} else {
+				var output *OutputInterruptedError
+				if !errors.As(failure, &output) || !strings.Contains(failure.Error(), tc.want) {
+					t.Fatalf("wrong failure classification: %v", failure)
+				}
+				if final != nil {
+					t.Fatal("invalid input became an executable response")
+				}
+				if tc.name == "malformed finished input" {
+					var syntaxErr *json.SyntaxError
+					if !errors.As(failure, &syntaxErr) || syntaxErr.Offset == 0 {
+						t.Fatalf("JSON syntax cause/position lost: %v", failure)
+					}
+					if strings.Contains(failure.Error(), "truncated") {
+						t.Fatalf("malformed input reported as truncation: %v", failure)
+					}
+				}
+				if tc.name == "connection closes mid input" && !errors.Is(failure, io.ErrUnexpectedEOF) {
+					t.Fatalf("stream closure cause lost: %v", failure)
+				}
+			}
+			if requests.Load() != 1 || len(*sleeps) != 0 {
+				t.Fatal("adapter must leave unusable-output recovery to its caller")
+			}
+		})
+	}
+}
+
+// Run with ADK_MODELS_LIVE=1 and AI_GATEWAY_API_KEY. The low output limit
+// deliberately exercises the provider's real max_tokens termination.
+func TestHaikuMessagesOutputLive(t *testing.T) {
+	key := os.Getenv("AI_GATEWAY_API_KEY")
+	if os.Getenv("ADK_MODELS_LIVE") != "1" || key == "" {
+		t.Skip("explicit live integration settings are not set")
+	}
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("xhigh/stream=%t", stream), func(t *testing.T) {
+			maxTokens := int32(64000)
+			if !stream {
+				maxTokens = 1024
+			} // The SDK requires streaming for a 64k output allowance.
+			client := anthropic.NewClient(option.WithAPIKey(key), option.WithBaseURL("https://ai-gateway.vercel.sh"), option.WithMaxRetries(0))
+			llm, err := NewModel(Config{Client: client, Model: adkmodels.ModelConfig{CanonicalModel: "claude-haiku-5-5", RequestModel: "anthropic/claude-haiku-5.5", DefaultMaxOutputTokens: maxTokens, Reasoning: adkmodels.ReasoningConfig{DefaultLevel: adkmodels.ThinkingLevelXHigh}, Vercel: &adkmodels.VercelConfig{Only: []string{"anthropic"}, ZeroDataRetention: true}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := haikuOutputRequest("Use write_file to save outputs/report.txt with content Hello.")
+			ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+			defer cancel()
+			var call *genai.FunctionCall
+			for response, err := range llm.GenerateContent(ctx, req, stream) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if response == nil || response.Partial || response.Content == nil {
+					continue
+				}
+				for _, part := range response.Content.Parts {
+					if part.FunctionCall != nil {
+						call = part.FunctionCall
+					}
+				}
+			}
+			if call == nil || call.Name != "write_file" || call.Args["content"] != "Hello" {
+				t.Fatalf("tool call missing/changed: %+v", call)
+			}
+		})
+	}
+	t.Run("actual token exhaustion", func(t *testing.T) {
+		client := anthropic.NewClient(option.WithAPIKey(key), option.WithBaseURL("https://ai-gateway.vercel.sh"), option.WithMaxRetries(0))
+		llm, err := NewModel(Config{Client: client, Model: adkmodels.ModelConfig{CanonicalModel: "claude-haiku-5-5", RequestModel: "anthropic/claude-haiku-5.5", DefaultMaxOutputTokens: 32, Reasoning: adkmodels.ReasoningConfig{DefaultLevel: genai.ThinkingLevelMinimal}, Vercel: &adkmodels.VercelConfig{Only: []string{"anthropic"}, ZeroDataRetention: true}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := haikuOutputRequest("Use write_file now to save outputs/report.txt containing a 1000-word essay on the history of sailing.")
+		req.Config.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeAny, AllowedFunctionNames: []string{"write_file"}}}
+		ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+		defer cancel()
+		var failure error
+		for response, err := range llm.GenerateContent(ctx, req, true) {
+			if err != nil {
+				failure = err
+			}
+			if response != nil && !response.Partial {
+				t.Fatal("partial tool call became executable")
+			}
+		}
+		var output *OutputInterruptedError
+		if !errors.As(failure, &output) || output.StopReason != anthropic.StopReasonMaxTokens || !strings.Contains(output.Error(), "reason=max_tokens") || output.PartialInput == "" {
+			t.Fatalf("provider token-limit evidence missing: %v", failure)
+		}
+		t.Logf("provider stop=%s, tool=%s, input_bytes=%d, cause=%v", output.StopReason, output.ToolName, len(output.PartialInput), output.Cause)
+	})
+}
+
+func haikuOutputRequest(prompt string) *model.LLMRequest {
+	return &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText(prompt, genai.RoleUser)}, Config: &genai.GenerateContentConfig{Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "write_file", Description: "Save the requested report.", ParametersJsonSchema: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}, "additionalProperties": false}}}}}}}
 }
