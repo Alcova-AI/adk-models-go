@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.1.9] - Anthropic output failure diagnostics
+
+### Fixed
+
+- Distinguish malformed tool input, provider output-token exhaustion and interrupted streams using the Anthropic stop reason. Preserve the underlying error and JSON syntax position without including tool arguments in ordinary error messages.
+- Cover output failures with captured Haiku Messages streams and opt-in live XHigh and token-exhaustion checks.
+
 ## [v0.1.8] - Native Vercel tool schemas and prompt cache boundaries
 
 ### Added
