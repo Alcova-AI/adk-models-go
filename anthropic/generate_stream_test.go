@@ -655,7 +655,7 @@ func TestGenerateStream_IncompleteToolBlockConnectionEnds(t *testing.T) {
 				`{"type":"content_block_stop","index":0}`,
 			}
 			if overload {
-				payloads = append(payloads, `{"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`)
+				payloads = append(payloads, `{"type":"error","error":{"type":"overloaded_error","message":"overloaded: private-client-argument"}}`)
 			}
 			srv, requests := newSSEServer(t, sseFromPayloads(t, payloads))
 			m, sleeps := newStreamTestModel(t, srv.URL)
@@ -671,6 +671,16 @@ func TestGenerateStream_IncompleteToolBlockConnectionEnds(t *testing.T) {
 				var apiErr *anthropic.Error
 				if !errors.As(interrupted, &apiErr) {
 					t.Fatalf("underlying error lost: %v", interrupted)
+				}
+				if strings.Contains(interrupted.Error(), "private-client-argument") {
+					t.Fatal("ordinary output error exposed provider error content")
+				}
+				if !strings.Contains(apiErr.Error(), "private-client-argument") || !errors.Is(interrupted, apiErr) {
+					t.Fatal("original provider cause was not preserved")
+				}
+				var syntaxErr *json.SyntaxError
+				if !errors.As(interrupted, &syntaxErr) || !strings.Contains(interrupted.Error(), fmt.Sprintf("tool input JSON at byte %d", syntaxErr.Offset)) {
+					t.Fatal("safe tool input JSON position was not preserved")
 				}
 			}
 			if requests.Load() != 1 || len(*sleeps) != 0 {
@@ -735,6 +745,8 @@ func TestGenerateStream_CapturedHaikuOutputFailures(t *testing.T) {
 	}{
 		{"real XHigh success", string(successful), "", true},
 		{"real max_tokens", string(limited), "reason=max_tokens", false},
+		{"context window exhausted", strings.Replace(string(limited), "max_tokens", "model_context_window_exceeded", 1), "reason=context_window_exceeded", false},
+		{"unknown stop reason", strings.Replace(damaged, `"stop_reason":"tool_use"`, `"stop_reason":"future_reason"`, 1), "reason=unknown", false},
 		{"malformed finished input", damaged, "reason=invalid_tool_input", false},
 		{"connection closes mid input", prefix[:cut], "reason=stream_interrupted", false},
 	} {

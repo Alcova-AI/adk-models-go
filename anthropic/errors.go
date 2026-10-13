@@ -28,7 +28,8 @@ import (
 
 // OutputInterruptedError reports unusable tool input or interrupted output.
 // FailureReason distinguishes malformed input from a provider token limit or
-// an interrupted stream. Invalid JSON alone does not establish truncation.
+// context exhaustion, an interrupted stream, or an unknown failure.
+// Invalid JSON alone does not establish truncation.
 // The adapter detects the failure and preserves everything
 // that survived; it makes no decision about how to continue. Callers own
 // that policy: inspect the salvaged content with errors.As and decide
@@ -59,8 +60,13 @@ type OutputInterruptedError struct {
 
 	// Cause is the underlying error that surfaced the interruption, if any
 	// (e.g. the SDK accumulator's marshal failure). May be nil when the
-	// interruption was detected directly from the stop reason.
+	// interruption was detected directly from the stop reason. Provider errors
+	// can contain sensitive details; do not log Cause directly.
 	Cause error
+
+	// inputSyntaxOffset comes only from parsing PartialInput, not from a
+	// provider error that could describe a different JSON document.
+	inputSyntaxOffset int64
 }
 
 func (e *OutputInterruptedError) Error() string {
@@ -68,8 +74,8 @@ func (e *OutputInterruptedError) Error() string {
 	if e.ToolName != "" {
 		message += fmt.Sprintf(": tool call %q has %d bytes of unusable input", e.ToolName, len(e.PartialInput))
 	}
-	if e.Cause != nil {
-		message += ": " + e.Cause.Error()
+	if e.inputSyntaxOffset > 0 {
+		message += fmt.Sprintf(": tool input JSON at byte %d: invalid JSON syntax", e.inputSyntaxOffset)
 	}
 	return message
 }
@@ -78,14 +84,22 @@ func (e *OutputInterruptedError) Unwrap() error { return e.Cause }
 
 // FailureReason uses the provider's terminal reason, never the JSON length.
 // An absent terminal reason means stream completion was not observed.
+// Unrecognised terminal reasons remain unknown instead of implying bad JSON.
 func (e *OutputInterruptedError) FailureReason() string {
 	switch e.StopReason {
 	case anthropic.StopReasonMaxTokens:
 		return "max_tokens"
+	case anthropic.StopReasonModelContextWindowExceeded:
+		return "context_window_exceeded"
 	case "":
 		return "stream_interrupted"
+	case anthropic.StopReasonToolUse, anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence:
+		if e.ToolName != "" && e.PartialInput != "" {
+			return "invalid_tool_input"
+		}
+		return "unknown"
 	default:
-		return "invalid_tool_input"
+		return "unknown"
 	}
 }
 
@@ -107,11 +121,13 @@ func newOutputInterruptedError(msg *anthropic.Message, cause error, includeThoug
 	if stopReason == "" && cause == nil {
 		cause = io.ErrUnexpectedEOF
 	}
+	var inputSyntaxOffset int64
 	if salvaged.PartialInput != "" {
 		var input any
 		if inputErr := json.Unmarshal([]byte(salvaged.PartialInput), &input); inputErr != nil {
 			var syntaxErr *json.SyntaxError
 			if errors.As(inputErr, &syntaxErr) {
+				inputSyntaxOffset = syntaxErr.Offset
 				inputErr = fmt.Errorf("tool input JSON at byte %d: %w", syntaxErr.Offset, inputErr)
 			}
 			cause = errors.Join(cause, inputErr)
@@ -119,12 +135,13 @@ func newOutputInterruptedError(msg *anthropic.Message, cause error, includeThoug
 	}
 
 	return &OutputInterruptedError{
-		StopReason:   stopReason,
-		Parts:        salvaged.Parts,
-		ToolName:     salvaged.ToolName,
-		ToolID:       salvaged.ToolID,
-		PartialInput: salvaged.PartialInput,
-		Cause:        cause,
+		StopReason:        stopReason,
+		Parts:             salvaged.Parts,
+		ToolName:          salvaged.ToolName,
+		ToolID:            salvaged.ToolID,
+		PartialInput:      salvaged.PartialInput,
+		Cause:             cause,
+		inputSyntaxOffset: inputSyntaxOffset,
 	}
 }
 

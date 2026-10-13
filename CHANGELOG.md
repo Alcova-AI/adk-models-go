@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Distinguish malformed tool input, provider output-token exhaustion and interrupted streams using the Anthropic stop reason. Preserve the underlying error and JSON syntax position without including tool arguments in ordinary error messages.
+- Distinguish malformed tool input, provider output-token exhaustion and interrupted streams using the Anthropic stop reason. Handle context-window exhaustion explicitly and leave unknown stop reasons uncertain. Preserve underlying errors for inspection and expose safe diagnostics, including the tool-input JSON syntax position, without unrestricted provider error text.
 - Cover output failures with captured Haiku Messages streams and opt-in live XHigh and token-exhaustion checks.
 
 ## [v0.1.8] - Native Vercel tool schemas and prompt cache boundaries
