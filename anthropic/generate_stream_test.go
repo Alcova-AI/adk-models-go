@@ -740,15 +740,15 @@ func TestGenerateStream_CapturedHaikuOutputFailures(t *testing.T) {
 		t.Fatal("captured stream has no terminal event")
 	}
 	for _, tc := range []struct {
-		name, body, want string
-		success          bool
+		name, body, wantReason string
+		success                bool
 	}{
 		{"real XHigh success", string(successful), "", true},
-		{"real max_tokens", string(limited), "reason=max_tokens", false},
-		{"context window exhausted", strings.Replace(string(limited), "max_tokens", "model_context_window_exceeded", 1), "reason=context_window_exceeded", false},
-		{"unknown stop reason", strings.Replace(damaged, `"stop_reason":"tool_use"`, `"stop_reason":"future_reason"`, 1), "reason=unknown", false},
-		{"malformed finished input", damaged, "reason=invalid_tool_input", false},
-		{"connection closes mid input", prefix[:cut], "reason=stream_interrupted", false},
+		{"real max_tokens", string(limited), "max_tokens", false},
+		{"context window exhausted", strings.Replace(string(limited), "max_tokens", "model_context_window_exceeded", 1), "context_window_exceeded", false},
+		{"unknown stop reason", strings.Replace(damaged, `"stop_reason":"tool_use"`, `"stop_reason":"future_reason"`, 1), "unknown", false},
+		{"malformed finished input", damaged, "invalid_tool_input", false},
+		{"connection closes mid input", prefix[:cut], "stream_interrupted", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, requests := newSSEServer(t, tc.body)
@@ -779,7 +779,7 @@ func TestGenerateStream_CapturedHaikuOutputFailures(t *testing.T) {
 				}
 			} else {
 				var output *OutputInterruptedError
-				if !errors.As(failure, &output) || !strings.Contains(failure.Error(), tc.want) {
+				if !errors.As(failure, &output) || output.FailureReason() != tc.wantReason {
 					t.Fatalf("wrong failure classification: %v", failure)
 				}
 				if final != nil {
@@ -865,7 +865,7 @@ func TestHaikuMessagesOutputLive(t *testing.T) {
 			}
 		}
 		var output *OutputInterruptedError
-		if !errors.As(failure, &output) || output.StopReason != anthropic.StopReasonMaxTokens || !strings.Contains(output.Error(), "reason=max_tokens") || output.PartialInput == "" {
+		if !errors.As(failure, &output) || output.StopReason != anthropic.StopReasonMaxTokens || output.FailureReason() != "max_tokens" || output.PartialInput == "" {
 			t.Fatalf("provider token-limit evidence missing: %v", failure)
 		}
 		t.Logf("provider stop=%s, tool=%s, input_bytes=%d, cause=%v", output.StopReason, output.ToolName, len(output.PartialInput), output.Cause)
