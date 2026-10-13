@@ -134,9 +134,9 @@ func SalvageInterruptedMessage(msg *anthropic.Message) InterruptedContent {
 }
 
 // HasIncompleteToolInput reports whether any tool_use block in the message
-// carries input that isn't valid JSON — the signature of a tool call cut off
-// mid-generation. Used to detect an interruption even when the SDK accumulator
-// didn't surface an error.
+// carries input that is not valid JSON. This prevents executing invalid input;
+// the caller must inspect the provider stop reason to distinguish malformed
+// JSON from output-token exhaustion or an interrupted stream.
 func HasIncompleteToolInput(msg *anthropic.Message) bool {
 	if msg == nil {
 		return false
@@ -150,7 +150,7 @@ func HasIncompleteToolInput(msg *anthropic.Message) bool {
 }
 
 // isIncompleteToolUse reports whether a content block is a tool_use block whose
-// accumulated input JSON is truncated (not valid JSON). It reads the flattened
+// accumulated input JSON is not valid. It reads the flattened
 // ContentBlockUnion fields because those are what the SDK accumulator keeps
 // current for an in-progress block.
 func isIncompleteToolUse(block anthropic.ContentBlockUnion) bool {

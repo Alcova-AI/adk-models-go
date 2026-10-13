@@ -86,7 +86,7 @@ func TestNewOutputInterruptedError_FromAccumulateFailure(t *testing.T) {
 	if err.PartialInput != `{"path": "/reports/summ` {
 		t.Errorf("PartialInput = %q, want the truncated fragment", err.PartialInput)
 	}
-	if err.Cause != accErr {
+	if !errors.Is(err.Cause, accErr) {
 		t.Errorf("Cause = %v, want the accumulate error", err.Cause)
 	}
 

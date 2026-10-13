@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.1.9] - Anthropic output failure diagnostics
+
+### Fixed
+
+- Classify existing Anthropic streaming output failures using the provider stop reason: invalid tool JSON, output-token exhaustion, context-window exhaustion, interrupted streams or an unknown reason. Invalid JSON alone no longer implies an output-token limit.
+- Keep underlying errors available through Go error inspection. Ordinary error messages include safe diagnostic fields and the tool-input JSON syntax position, without unrestricted provider error text.
+
 ## [v0.1.8] - Native Vercel tool schemas and prompt cache boundaries
 
 ### Added
