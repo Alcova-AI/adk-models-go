@@ -12,6 +12,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/Alcova-AI/adk-models-go/internal/family"
+	"github.com/Alcova-AI/adk-models-go/tooldiscovery"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
 )
 
@@ -21,6 +22,7 @@ const (
 )
 
 type ModelConfig struct {
+	ToolDiscovery          tooldiscovery.Mode
 	ToolSchemas            toolschema.Config
 	CanonicalModel         string
 	RequestModel           string
@@ -33,6 +35,9 @@ type ModelConfig struct {
 // Validate checks identity and explicitly supplied settings. Endpoint support is
 // left to the provider; the library does not maintain a model catalogue.
 func (c ModelConfig) Validate() error {
+	if c.ToolDiscovery != tooldiscovery.Application && c.ToolDiscovery != tooldiscovery.Native {
+		return fmt.Errorf("unsupported tool discovery mode %q", c.ToolDiscovery)
+	}
 	if c.PromptCaching.SystemInstructionPartIndex != nil && *c.PromptCaching.SystemInstructionPartIndex < 0 {
 		return fmt.Errorf("system cache part index must be non-negative")
 	}

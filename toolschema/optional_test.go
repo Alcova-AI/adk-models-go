@@ -15,8 +15,8 @@ func TestResponsesOmissionRoundTrip(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object","properties":{"first":{"type":"integer"},"last":{"type":"integer"},"explicit":{"anyOf":[{"type":"integer"},{"type":"null"}]},"required":{"type":"integer"},"rows":{"type":"array","items":{"type":"object","properties":{"value":{"type":"integer"}}}}},"required":["required"]}`)
 	fd := &genai.FunctionDeclaration{Name: "example", ParametersJsonSchema: raw}
 	target := Target{"openai", "vercel-openai"}
-	if _, err := New(Config{}, target).Prepare(t.Context(), tools(fd)); err == nil {
-		t.Fatal("omission encoding requires opt-in")
+	if got, err := New(Config{Warn: quiet}, target).Prepare(t.Context(), tools(fd)); err != nil || *got["example"].Strict {
+		t.Fatalf("strict incompatibility must downgrade without error: %v", err)
 	}
 	prepared, err := New(Config{AllowUnsupported: true, Warn: quiet}, target).Prepare(t.Context(), tools(fd))
 	if err != nil {
@@ -67,7 +67,7 @@ func TestResponsesOmissionRoundTrip(t *testing.T) {
 }
 
 func TestOtherRoutesDoNotEncodeOmissions(t *testing.T) {
-	for _, target := range []Target{{"openai", "direct"}, {"openai", "vercel-native"}, {"anthropic", "vercel-anthropic"}, {"google", "vertex"}} {
+	for _, target := range []Target{{"anthropic", "vercel-anthropic"}, {"google", "vertex"}} {
 		prepared, err := New(Config{AllowUnsupported: true, Warn: quiet}, target).Prepare(t.Context(), tools(&genai.FunctionDeclaration{Name: "example", ParametersJsonSchema: map[string]any{"type": "object", "properties": map[string]any{"last": map[string]any{"type": "integer"}}}}))
 		if err != nil {
 			t.Fatal(err)

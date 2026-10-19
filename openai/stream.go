@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Alcova-AI/adk-models-go/internal/discovery"
 	"github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
 )
@@ -100,13 +101,22 @@ func (t *streamTranslator) process(evt responses.ResponseStreamEventUnion) (*gen
 			t.itemToName[added.Item.ID] = added.Item.Name
 		}
 		return nil, nil
+	case responseOutputItemDone:
+		item := evt.AsResponseOutputItemDone().Item
+		if item.Type == "tool_search_call" {
+			part, err := discovery.OpenAISearchPart(item.RawJSON())
+			if err != nil {
+				return nil, err
+			}
+			return singlePartResponse(part), nil
+		}
+		return nil, nil
 	case responseOutputTextDone,
 		responseReasoningTextDone,
 		responseReasoningSummaryTextDone,
 		responseCompleted,
 		responseIncomplete,
-		responseInProgress,
-		responseOutputItemDone:
+		responseInProgress:
 		// Informational events with no part of their own. generateStream reads
 		// the finish reason off the terminal ones directly.
 		return nil, nil

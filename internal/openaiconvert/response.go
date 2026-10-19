@@ -21,6 +21,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/Alcova-AI/adk-models-go/internal/discovery"
 	"github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
 
@@ -149,10 +150,21 @@ func convertOutputItemsWithThoughts(items []responses.ResponseOutputItemUnion, i
 					return nil, fmt.Errorf("%w: %q", ErrUnsupportedMessageContentType, content.Type)
 				}
 			}
+		case "tool_search_call":
+			part, err := discovery.OpenAISearchPart(item.RawJSON())
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
 		case "function_call":
 			part, err := convertFunctionCall(item)
 			if err != nil {
 				return nil, err
+			}
+			var wire map[string]any
+			_ = json.Unmarshal([]byte(item.RawJSON()), &wire)
+			if ns, ok := wire["namespace"].(string); ok && strings.HasPrefix(ns, "adk_discovery_") {
+				part.PartMetadata = map[string]any{discovery.MetadataKey: map[string]any{"provider": "openai", "namespace": ns}}
 			}
 			parts = append(parts, part)
 		case "reasoning":

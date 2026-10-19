@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
+
+	"github.com/Alcova-AI/adk-models-go/internal/discovery"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal/metadata"
@@ -78,7 +81,15 @@ func convertOutputPart(output protocol.OutputPart, includeThoughts bool) (*genai
 				return nil, &ToolInputError{ToolCallID: output.ToolCallID, ToolName: output.ToolName, RawInput: output.Input, Err: err}
 			}
 		}
-		return &genai.Part{FunctionCall: &genai.FunctionCall{ID: output.ToolCallID, Name: output.ToolName, Args: args}}, nil
+		part := &genai.Part{FunctionCall: &genai.FunctionCall{ID: output.ToolCallID, Name: output.ToolName, Args: args}}
+		if m, ok := output.ProviderMetadata["openai"].(map[string]any); ok {
+			ns, _ := m["namespace"].(string)
+			itemID, _ := m["itemId"].(string)
+			if strings.HasPrefix(itemID, "tsc_") || strings.HasPrefix(ns, "adk_discovery_") {
+				part.PartMetadata = map[string]any{discovery.MetadataKey: map[string]any{"provider": "openai", "item_id": m["itemId"], "namespace": ns}}
+			}
+		}
+		return part, nil
 	case "tool-result":
 		return &genai.Part{FunctionResponse: &genai.FunctionResponse{ID: output.ToolCallID, Name: output.ToolName, Response: map[string]any{"result": output.Result}}}, nil
 	case "file", "reasoning-file":
