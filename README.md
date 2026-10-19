@@ -388,47 +388,26 @@ See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes
 
 ## Native tool discovery (opt-in)
 
-Set `ModelConfig.ToolDiscovery = tooldiscovery.Native`. The zero value preserves
-application-managed loading. Supported adapters are OpenAI Responses, Anthropic
-Messages, and the Vercel native adapter for those families. Chat Completions and
-other families reject the native opt-in. Model and endpoint availability remain
-the provider's responsibility.
+Enable native discovery for the agent that owns tool search:
 
-Supply `tooldiscovery.WithCatalog(ctx, tooldiscovery.Catalog{SearchTool: name,
-AlwaysLoaded: names, ResolveResult: resolver})` for the agent that owns discovery.
-The resolver extracts exact loaded tool names from the application's existing
-result without I/O. Requests must contain all authorised declarations; callers
-must still restrict `LLMRequest.Tools` to loaded executable tools. Calls without
-catalogue context, including helper agents, retain ordinary calling.
+```go
+cfg.ToolDiscovery = tooldiscovery.Native
+ctx = tooldiscovery.WithCatalog(ctx, tooldiscovery.Catalog{
+    SearchTool:    "search_tools",
+    ResolveResult: resolveLoadedToolNames,
+})
+```
 
-Anthropic sends the full stable catalogue with deferred flags and adds native
-references on first discovery. It rejects references mixed with ordinary result
-text. The adapter therefore appends the exact first search-result JSON, labelled
-as untrusted data, to one newly discovered deferred definition and returns the
-references. This avoids duplicating feedback across every loaded tool. Repeated
-and empty searches retain their ordinary results; original ADK results are never
-modified. Deferred descriptions are excluded from the initial cached prefix.
+Supported routes are OpenAI Responses, Anthropic Messages and native Vercel for
+those families. Chat Completions and other families reject this option. Omit it
+to keep application-managed loading.
 
-OpenAI uses client-executed tool search and loads definitions in a namespace in
-the search result, with the complete result JSON as labelled untrusted namespace
-data. Native IDs and namespace metadata are retained in `genai.Part.PartMetadata`;
-persist this field when saving history. Empty OpenAI searches return an empty native tool list plus the exact application
-feedback as ordinary function output for the same call. The initial tools remain
-unchanged. Both providers use ordinary loaded tools when their discovery
-history is absent, including after history compaction or application-side loading.
-These fallbacks preserve execution semantics and can cause a cache miss.
-
-Native catalogue order is canonicalised before schema preparation and caching.
-Keep the authorised catalogue and always-loaded set stable for a conversation. Native discovery preserves the existing prefix; it does not
-promise a provider cache hit. Expiry, minimum context and route changes still
-apply. No catalogue or session data is retained on the shared model instance.
-
-Paid synthetic integration tests: set `ADK_DISCOVERY_LIVE=1`,
-`ADK_DISCOVERY_OUTPUT=/absolute/evidence/path`, and optionally
-`ADK_DISCOVERY_ROUTE=openai-native` (or `anthropic-native`, `openai-direct`,
-`openai-responses`, `anthropic-messages`, `anthropic-direct`) before running
-`go test . -run TestNativeDiscoveryADKLive -count=1 -v`. Set
-`ADK_DISCOVERY_NONSTREAM=1` to exercise non-streaming discovery.
+The application still owns search, authorisation and execution. See
+[`Catalog`](tooldiscovery/config.go) for the catalogue and history requirements.
+Keep the authorised catalogue and always-loaded set stable. Native discovery
+preserves the cached prefix, but does not guarantee a cache hit. If loaded tools
+lack discovery history, adapters warn and use ordinary loading, which can cause
+a cache miss.
 
 ---
 
