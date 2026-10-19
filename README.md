@@ -22,7 +22,7 @@
 - **You own the client**: pass your own Anthropic or OpenAI SDK client, so authentication, endpoints, retries and HTTP behaviour stay under your control.
 - **Multiple model families through Vercel**: route across providers with typed routing, zero-data-retention and caching settings on `VercelConfig`.
 - **Tool schemas checked before sending**: each adapter rejects JSON Schema rules the provider cannot keep, instead of letting the provider drop them without notice. Unmapped models keep validated schema constraints without a verified provider profile. See the [live schema matrix](testdata/schema-matrix/README.md).
-- **No hidden provider fallbacks**: the library never changes providers, lowers reasoning effort or weakens retention. Native-discovery compatibility fallbacks emit warnings. Provider errors reach you unchanged.
+- **No hidden provider fallbacks**: the library never changes providers, lowers reasoning effort or weakens retention. Strict-mode downgrades and native-discovery compatibility fallbacks emit warnings. Provider errors reach you unchanged.
 
 ---
 
@@ -377,8 +377,11 @@ The adapter logs a warning for each changed rule. Set `ToolSchemas.Warn` to hand
 ### What to expect from each provider
 
 - The adapters use strict mode where the provider can keep the schema. Even with strict mode, validate arguments before you run a tool.
-- Some schemas need `AllowUnsupported`, such as open objects, some optional fields, or rules a provider does not support.
-- For OpenAI through Vercel Responses, `AllowUnsupported` also handles optional, non-nullable typed fields. The model can return a null marker for an omitted field, and the adapter removes that marker from the final arguments. Required fields and fields that already allow null keep their meaning. This also covers named local references and simple nullable alternatives.
+- OpenAI adapters encode optional non-nullable fields as required value-or-null fields, including through named definitions and arrays. Final tool arguments restore only adapter-added null placeholders to omission. Explicit zero, false, empty strings and genuine nullable values retain their meaning. Optional fields that already accept null remain optional and can require non-strict fallback, because null cannot also unambiguously represent absence.
+- Anthropic keeps native optional fields. The adapter automatically disables strict mode, with warnings, when the request exceeds 20 strict tools, 24 optional parameters or 16 union parameters. Tools remain callable. Other provider grammar limits may still reject a request.
+- `ToolSchemas.StrictModeHints` allocates strict capacity on providers with a shared budget. Anthropic uses nil to consider all compatible tools in declaration order. A non-nil slice considers only the named tools in slice order; an explicit empty slice disables Anthropic strict mode. OpenAI ignores hints, including an empty slice, and enables strict mode for every compatible tool. The same hints can therefore be used across profiles. Absent names and duplicates are ignored. Hints are preferences: strict incompatibility or budget exhaustion warns rather than errors, independently of `AllowUnsupported`. Invalid schemas and actual unsupported schema transformations still follow the compatibility rules.
+- `ToolSchemas.OnStrictSelection` receives each request's final names, flags, hint status and reasons. The default emits a structured info log without schemas, arguments or content.
+- `AllowUnsupported` controls losses in schema translation, not strict-mode preferences. A schema remaining non-strict does not itself need this opt-in.
 - All routes accept acyclic named local references (`#/$defs/name` or `#/definitions/name`). The adapters reject external and recursive references, anchors and nested reference scopes. Provider schema complexity limits still apply.
 - Gemini through Vercel receives complete alternatives for type lists such as `["array", "null"]`. Item rules and descriptions stay inside each alternative. Descriptions on explicit alternatives move into their branches. Unsupported combinations of `anyOf` with other assertions stay errors, even with `AllowUnsupported`, so no assertion is lost without notice. Native Vertex keeps its existing JSON Schema representation.
 
@@ -418,8 +421,9 @@ unchanged. Both providers use ordinary loaded tools when their discovery
 history is absent, including after history compaction or application-side loading.
 These fallbacks preserve execution semantics and can cause a cache miss.
 
-Native catalogue order is canonicalised before schema preparation and caching.
-Keep the authorised catalogue and always-loaded set stable for a conversation. Native discovery preserves the existing prefix; it does not
+Native catalogue order is canonicalised before strict allocation and caching.
+Keep the authorised catalogue, hints and always-loaded set stable for a
+conversation. Native discovery preserves the existing prefix; it does not
 promise a provider cache hit. Expiry, minimum context and route changes still
 apply. No catalogue or session data is retained on the shared model instance.
 

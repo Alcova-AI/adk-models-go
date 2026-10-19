@@ -171,9 +171,9 @@ func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMReques
 		return singleError(err)
 	}
 	if stream {
-		return discovery.Responses(m.generateStream(ctx, options, includesThoughts(req)), plan)
+		return toolschema.RestoreOmissions(discovery.Responses(m.generateStream(ctx, options, includesThoughts(req)), plan), prepared)
 	}
-	return discovery.Responses(m.generate(ctx, options, includesThoughts(req)), plan)
+	return toolschema.RestoreOmissions(discovery.Responses(m.generate(ctx, options, includesThoughts(req)), plan), prepared)
 }
 
 func (m *gatewayModel) generate(ctx context.Context, options protocol.CallOptions, includeThoughts bool) iter.Seq2[*model.LLMResponse, error] {
