@@ -137,7 +137,6 @@ func TestAnthropicStrictSelectionUsesCallerPriority(t *testing.T) {
 			ParametersJsonSchema: map[string]any{"type": "object", "properties": properties, "additionalProperties": false},
 		})
 	}
-	processor := New(Config{AllowUnsupported: true, Warn: quiet}, Target{"anthropic", "vercel-anthropic"})
 	for _, reverse := range []bool{false, true} {
 		ordered := append([]*genai.FunctionDeclaration(nil), declarations...)
 		if reverse {
@@ -149,7 +148,7 @@ func TestAnthropicStrictSelectionUsesCallerPriority(t *testing.T) {
 		for i := 2; i <= 20; i++ {
 			priority = append(priority, fmt.Sprintf("tool%02d", i))
 		}
-		processor = New(Config{StrictModeHints: priority, Warn: quiet}, Target{"anthropic", "vercel-anthropic"})
+		processor := New(Config{StrictModeHints: priority, Warn: quiet}, Target{"anthropic", "vercel-anthropic"})
 		ctx := t.Context()
 		result, err := processor.Prepare(ctx, []*genai.Tool{{FunctionDeclarations: ordered[:10]}, {FunctionDeclarations: ordered[10:]}})
 		if err != nil {

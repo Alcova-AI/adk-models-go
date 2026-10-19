@@ -95,7 +95,7 @@ func NewModel(cfg Config) (model.LLM, error) {
 		return nil, fmt.Errorf("direct anthropic adapter requires its own model family; cross-family requests require Vercel")
 	}
 	if cfg.Model.ToolDiscovery == tooldiscovery.Native && f != family.Anthropic {
-		return nil, fmt.Errorf("Anthropic native discovery requires an Anthropic model")
+		return nil, fmt.Errorf("native discovery requires an Anthropic model")
 	}
 	cache := cfg.Model.PromptCaching.Anthropic
 	if f == family.Anthropic {
