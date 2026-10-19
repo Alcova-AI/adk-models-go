@@ -32,6 +32,12 @@ func objects(v any) []map[string]any {
 	return out
 }
 func text(v any) string { s, _ := v.(string); return s }
+
+// OpenAIWire uses client-executed search, loading definitions in result namespaces.
+// Namespace descriptions carry the complete search feedback as untrusted data.
+// Empty searches retain both an empty native tool list and the exact application
+// feedback as ordinary function output under the same call ID. Stored metadata
+// restores provider item IDs and function namespaces when history is replayed.
 func (p *Plan) OpenAIWire(body map[string]any) error {
 	if p.Fallback {
 		tools := []any{}
@@ -106,6 +112,12 @@ func (p *Plan) OpenAIWire(body map[string]any) error {
 	body["input"] = input
 	return nil
 }
+
+// AnthropicWire keeps the full catalogue stable and loads deferred tool references.
+// The API rejects ordinary text mixed with references, so exact first-discovery
+// feedback is attached as untrusted data to one newly discovered definition.
+// Deferred descriptions are outside the initial cached prefix. Repeat and empty
+// searches keep their ordinary results. Original ADK history remains unchanged.
 func (p *Plan) AnthropicWire(body map[string]any) {
 	if p.Fallback {
 		tools := []any{}

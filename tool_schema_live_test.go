@@ -21,8 +21,12 @@ import (
 	"github.com/Alcova-AI/adk-models-go/toolschema"
 )
 
-// Paid, synthetic provider checks. No tools execute and no customer data is used.
-func TestStrictToolTranslationVercelLive(t *testing.T) {
+// TestStrictToolTranslationLive checks synthetic tool arguments across direct
+// Anthropic and Vercel routes. No tools execute and no customer data is used.
+// Enable the paid checks explicitly:
+//
+//	ADK_STRICT_LIVE=1 ADK_STRICT_OUTPUT=/absolute/evidence/path go test . -run '^TestStrictToolTranslationLive$' -count=1 -v
+func TestStrictToolTranslationLive(t *testing.T) {
 	if os.Getenv("ADK_STRICT_LIVE") != "1" {
 		t.Skip("set ADK_STRICT_LIVE=1 for paid synthetic calls")
 	}

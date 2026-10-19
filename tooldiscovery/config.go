@@ -19,8 +19,17 @@ const (
 
 // Catalog describes the application's existing search contract. ResolveResult
 // returns exact names loaded by a search result; it must not perform I/O.
-// All declarations, including deferred ones, must be present in LLMRequest.Config.
-// The application remains responsible for filtering executable LLMRequest.Tools.
+// All authorised declarations, including deferred ones, must be present in
+// LLMRequest.Config.Tools. The application remains responsible for restricting
+// executable LLMRequest.Tools to loaded tools. Keep the catalogue and AlwaysLoaded
+// set stable for a conversation; adapters canonicalise the declaration order.
+// Calls without catalogue context retain ordinary tool calling.
+//
+// Persist genai.Part.PartMetadata with conversation history: it carries native
+// discovery IDs and namespaces for replay. If discovery history is unavailable,
+// including after compaction or application-side loading, adapters use ordinary
+// loaded tools with a warning. This can cause a cache miss. Catalogue and session
+// data are request-local and are not retained on the shared model instance.
 type Catalog struct {
 	SearchTool    string
 	AlwaysLoaded  []string

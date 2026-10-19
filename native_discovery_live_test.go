@@ -61,7 +61,13 @@ func (m *discoveryLiveRecorder) GenerateContent(ctx context.Context, req *model.
 	}
 }
 
-// Paid synthetic real-ADK tool loops. No customer data or production writes.
+// TestNativeDiscoveryADKLive runs paid synthetic ADK tool loops without customer
+// data or production writes. Enable it explicitly:
+//
+//	ADK_DISCOVERY_LIVE=1 ADK_DISCOVERY_OUTPUT=/absolute/evidence/path go test . -run '^TestNativeDiscoveryADKLive$' -count=1 -v
+//
+// Set ADK_DISCOVERY_ROUTE to select a route from the table below, and set
+// ADK_DISCOVERY_NONSTREAM=1 to exercise non-streaming discovery.
 func TestNativeDiscoveryADKLive(t *testing.T) {
 	if os.Getenv("ADK_DISCOVERY_LIVE") != "1" {
 		t.Skip("set ADK_DISCOVERY_LIVE=1 for paid synthetic calls")
