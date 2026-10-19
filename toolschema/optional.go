@@ -18,8 +18,8 @@ type omissionPlan struct {
 	items      *omissionPlan
 }
 
-// OpenAI strict tools require every property to be required. Encode an optional
-// non-nullable value as a required value-or-null, then restore absence in final arguments.
+// Vercel Responses currently fills optional OpenAI fields despite strict:false.
+// Encode absence as null on that route, then restore absence in final arguments.
 // Existing nullable values retain their meaning; this is never a blanket null scrub.
 func (p *Processor) encodeOmissions(ctx context.Context, tool string, schema map[string]any, path string) (*omissionPlan, error) {
 	encoder := omissionEncoder{processor: p, ctx: ctx, tool: tool, root: schema, references: map[string]*omissionPlan{}}
@@ -73,6 +73,9 @@ func (e *omissionEncoder) fill(plan *omissionPlan, schema map[string]any, path s
 			return err
 		}
 		if !slices.Contains(required, any(name)) && referencedExcludesNull(e.root, child, map[string]bool{}) {
+			if err := e.processor.loss(e.ctx, e.tool, path+"/properties/"+escape(name), "optional", "encode omitted fields as null for Vercel Responses; restore absence in returned arguments"); err != nil {
+				return err
+			}
 			value := map[string]any{}
 			for key, v := range child {
 				value[key] = v
@@ -87,7 +90,6 @@ func (e *omissionEncoder) fill(plan *omissionPlan, schema map[string]any, path s
 			description, _ := child["description"].(string)
 			child["description"] = strings.TrimSpace(description + " Use null when this input was not provided; do not invent a value.")
 			child["anyOf"] = []any{value, map[string]any{"type": "null"}}
-			required = append(required, name)
 			// A definition can be used by both required and optional properties.
 			// Only this occurrence owns the omission marker, never the shared plan.
 			copyPlan := *childPlan
@@ -95,9 +97,6 @@ func (e *omissionEncoder) fill(plan *omissionPlan, schema map[string]any, path s
 			childPlan = &copyPlan
 		}
 		plan.properties[name] = childPlan
-	}
-	if len(required) > 0 {
-		schema["required"] = required
 	}
 	if items, ok := schema["items"].(map[string]any); ok {
 		child, err := e.plan(items, path+"/items")

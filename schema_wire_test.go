@@ -116,7 +116,7 @@ func TestMalformedSchemaNeverReachesProvider(t *testing.T) {
 func TestDefaultToolSchemaPolicyOnWire(t *testing.T) {
 	for _, adapter := range []string{"openai", "anthropic", "vercel"} {
 		for _, closed := range []bool{false, true} {
-			t.Run(adapter+map[bool]string{true: "/compatible", false: "/automatic-downgrade"}[closed], func(t *testing.T) {
+			t.Run(adapter+map[bool]string{true: "/compatible", false: "/needs-opt-in"}[closed], func(t *testing.T) {
 				var body map[string]any
 				calls := 0
 				client := &http.Client{Transport: wireTransport(func(r *http.Request) (*http.Response, error) {
@@ -145,12 +145,18 @@ func TestDefaultToolSchemaPolicyOnWire(t *testing.T) {
 						callErr = err
 					}
 				}
+				if !closed {
+					if callErr == nil || calls != 0 {
+						t.Fatalf("error=%v calls=%d", callErr, calls)
+					}
+					return
+				}
 				if callErr != nil {
 					t.Fatal(callErr)
 				}
 				raw, _ := json.Marshal(body)
-				if calls != 1 || !strings.Contains(string(raw), fmt.Sprintf(`"strict":%t`, closed)) {
-					t.Fatalf("wrong strict mode on wire: %s", raw)
+				if calls != 1 || !strings.Contains(string(raw), `"strict":true`) {
+					t.Fatalf("did not enable strict: %s", raw)
 				}
 			})
 		}

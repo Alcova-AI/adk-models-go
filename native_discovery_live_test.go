@@ -93,7 +93,7 @@ func TestNativeDiscoveryADKLive(t *testing.T) {
 					cfg.Vercel.SystemInstructionCacheOptions = map[string]map[string]any{"openai": {"promptCacheBreakpoint": map[string]any{"mode": "explicit"}}}
 				}
 			}
-			capture := &strictLiveResponseCapture{base: http.DefaultTransport}
+			capture := &liveToolResponseCapture{base: http.DefaultTransport}
 			tr := &matrixTransport{base: capture}
 			inner, err := matrixConfiguredModel(ctx, route, cfg.ToolSchemas, tr, cfg, 110*time.Second)
 			if err != nil {

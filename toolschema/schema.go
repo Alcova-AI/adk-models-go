@@ -32,16 +32,7 @@ type Target struct{ Provider, Route string }
 // optional; the default logs diagnostics without schema values or arguments.
 type Config struct {
 	AllowUnsupported bool
-	// StrictModeHints selects tools for providers with a shared strict-mode budget.
-	// Anthropic: nil considers every compatible tool in declaration order; a non-nil
-	// list considers only these names in order; an empty list disables strict mode.
-	// Absent names and duplicates are ignored. OpenAI ignores hints and enables
-	// strict mode for every compatible tool. Incompatible and over-budget tools
-	// remain callable without strict mode.
-	StrictModeHints []string
-	Warn            func(context.Context, Warning)
-	// OnStrictSelection observes the final per-request flags without schemas or arguments.
-	OnStrictSelection func(context.Context, StrictSelection)
+	Warn             func(context.Context, Warning)
 }
 
 type Warning struct{ Tool, Provider, Route, Path, Keyword, Reason string }
@@ -50,24 +41,9 @@ func (w Warning) Error() string {
 	return fmt.Sprintf("tool %q schema %s (%s): %s on %s/%s", w.Tool, w.Path, w.Keyword, w.Reason, w.Provider, w.Route)
 }
 
-// StrictSelection reports decisions after compatibility and request-budget checks.
-type StrictSelection struct {
-	Provider string           `json:"provider"`
-	Route    string           `json:"route"`
-	Tools    []StrictDecision `json:"tools"`
-}
-
-type StrictDecision struct {
-	Tool   string `json:"tool"`
-	Strict bool   `json:"strict"`
-	Reason string `json:"reason"`
-	Hinted bool   `json:"hinted"`
-}
-
 type Prepared struct {
-	strictReason string
-	omissions    *omissionPlan
-	Schema       map[string]any
+	omissions *omissionPlan
+	Schema    map[string]any
 	// JSONSchema preserves numeric tokens across SDK encoders that treat json.Number as a string.
 	JSONSchema json.RawMessage
 	// Strict is nil for native Gemini, where the SDK owns the wire format.
@@ -85,14 +61,11 @@ type Processor struct {
 }
 
 func New(config Config, target Target) *Processor {
-	config.StrictModeHints = slices.Clone(config.StrictModeHints)
 	return &Processor{config: config, target: target, seen: make(map[Warning]bool)}
 }
 
 func (p *Processor) Prepare(ctx context.Context, tools []*genai.Tool) (map[string]Prepared, error) {
 	result := make(map[string]Prepared)
-	hints := p.strictModeHints()
-	var declarations []string
 	for i, t := range tools {
 		if t == nil {
 			return nil, fmt.Errorf("tool %d is nil", i)
@@ -118,7 +91,7 @@ func (p *Processor) Prepare(ctx context.Context, tools []*genai.Tool) (map[strin
 				return nil, fmt.Errorf("tool %q converted schema: %w", fd.Name, err)
 			}
 			prepared := Prepared{Schema: schema}
-			if p.target.Provider == "openai" {
+			if p.target.Provider == "openai" && p.target.Route == "vercel-openai" {
 				prepared.omissions, err = p.encodeOmissions(ctx, fd.Name, schema, "#")
 				if err != nil {
 					return nil, err
@@ -132,44 +105,20 @@ func (p *Processor) Prepare(ctx context.Context, tools []*genai.Tool) (map[strin
 				if p.target.Provider == "anthropic" && !strings.HasPrefix(p.target.Route, "vercel") && containsNullableEnum(schema) {
 					strict = false
 				}
-				if !strict && (hints == nil || slices.Contains(hints, fd.Name)) {
-					p.warn(ctx, Warning{Tool: fd.Name, Provider: p.target.Provider, Route: p.target.Route, Path: "#", Keyword: "strict", Reason: "schema requires best-effort calling because strict-mode shape requirements cannot be preserved"})
-				}
-				if hints != nil && !slices.Contains(hints, fd.Name) {
-					strict = false
+				if !strict {
+					if err := p.loss(ctx, fd.Name, "#", "strict", "schema requires best-effort calling because strict-mode shape requirements cannot be preserved"); err != nil {
+						return nil, err
+					}
 				}
 				prepared.Strict = &strict
-				prepared.strictReason = "compatible"
-				if !strict {
-					prepared.strictReason = "schema_incompatible"
-				}
-				if hints != nil && !slices.Contains(hints, fd.Name) {
-					prepared.strictReason = "not_requested"
-				}
 			}
 			prepared.JSONSchema, err = json.Marshal(schema)
 			if err != nil {
 				return nil, fmt.Errorf("tool %q encode prepared schema: %w", fd.Name, err)
 			}
 			result[fd.Name] = prepared
-			declarations = append(declarations, fd.Name)
 		}
 	}
-	if p.target.Provider == "anthropic" {
-		budget := anthropicStrictBudget{}
-		for _, name := range anthropicStrictOrder(result, declarations, hints) {
-			prepared := result[name]
-			if budget.take(prepared.Schema) {
-				continue
-			}
-			p.warn(ctx, Warning{Tool: name, Provider: p.target.Provider, Route: p.target.Route, Path: "#", Keyword: "strict", Reason: "schema exceeds the request-wide strict-mode budget"})
-			strict := false
-			prepared.Strict = &strict
-			prepared.strictReason = "request_budget"
-			result[name] = prepared
-		}
-	}
-	p.reportStrictSelection(ctx, result, declarations)
 	return result, nil
 }
 
@@ -387,36 +336,4 @@ func (p *Processor) warn(ctx context.Context, w Warning) {
 		return
 	}
 	slog.LogAttrs(ctx, slog.LevelWarn, "Tool schema uses weaker provider enforcement", slog.String("tool", w.Tool), slog.String("provider", w.Provider), slog.String("route", w.Route), slog.String("schema_path", w.Path), slog.String("keyword", w.Keyword), slog.String("reason", w.Reason))
-}
-
-// Hints allocate the limited Anthropic request budget. Other providers keep
-// automatic strict selection so callers can use one configuration across routes.
-func (p *Processor) strictModeHints() []string {
-	if p.target.Provider == "anthropic" {
-		return p.config.StrictModeHints
-	}
-	return nil
-}
-
-func (p *Processor) reportStrictSelection(ctx context.Context, prepared map[string]Prepared, order []string) {
-	priority := make(map[string]bool)
-	for _, name := range p.strictModeHints() {
-		priority[name] = true
-	}
-	selection := StrictSelection{Provider: p.target.Provider, Route: p.target.Route}
-	for _, name := range order {
-		tool := prepared[name]
-		if tool.Strict == nil {
-			continue
-		}
-		selection.Tools = append(selection.Tools, StrictDecision{Tool: name, Strict: *tool.Strict, Reason: tool.strictReason, Hinted: priority[name]})
-	}
-	if len(selection.Tools) == 0 {
-		return
-	}
-	if p.config.OnStrictSelection != nil {
-		p.config.OnStrictSelection(ctx, selection)
-		return
-	}
-	slog.LogAttrs(ctx, slog.LevelInfo, "Tool schema strict-mode selection", slog.String("provider", selection.Provider), slog.String("route", selection.Route), slog.Any("tools", selection.Tools))
 }

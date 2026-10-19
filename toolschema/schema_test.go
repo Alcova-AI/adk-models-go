@@ -158,8 +158,8 @@ func TestDeclaredDialectCannotChangeSilently(t *testing.T) {
 func TestRootAnyOfNeedsExplicitOpenAIFallback(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object","properties":{"x":{"type":"integer"}},"required":["x"],"additionalProperties":false,"anyOf":[{"required":["x"]}]}`)
 	fd := &genai.FunctionDeclaration{Name: "test", ParametersJsonSchema: raw}
-	if got, err := New(Config{Warn: quiet}, Target{"openai", "direct"}).Prepare(t.Context(), tools(fd)); err != nil || *got["test"].Strict {
-		t.Fatalf("root anyOf must use non-strict fallback: %v", err)
+	if _, err := New(Config{}, Target{"openai", "direct"}).Prepare(t.Context(), tools(fd)); err == nil {
+		t.Fatal("accepted root anyOf in strict mode")
 	}
 	got, err := New(Config{AllowUnsupported: true, Warn: quiet}, Target{"openai", "direct"}).Prepare(t.Context(), tools(fd))
 	if err != nil {
@@ -254,8 +254,8 @@ func TestDirectClaudeNullableEnumRequiresBestEffort(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object","properties":{"x":{"anyOf":[{"type":"string","enum":["red"]},{"type":"null"}]}},"required":["x"],"additionalProperties":false}`)
 	for _, route := range []string{"direct", "vertex"} {
 		fd := &genai.FunctionDeclaration{Name: "test", ParametersJsonSchema: raw}
-		if got, err := New(Config{Warn: quiet}, Target{"anthropic", route}).Prepare(t.Context(), tools(fd)); err != nil || *got["test"].Strict {
-			t.Fatalf("nullable enum must downgrade: %v", err)
+		if _, err := New(Config{}, Target{"anthropic", route}).Prepare(t.Context(), tools(fd)); err == nil {
+			t.Fatal("accepted nullable enum without best-effort permission")
 		}
 		got, err := New(Config{AllowUnsupported: true, Warn: quiet}, Target{"anthropic", route}).Prepare(t.Context(), tools(fd))
 		if err != nil {
