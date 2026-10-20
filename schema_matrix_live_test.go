@@ -143,6 +143,9 @@ func matrixConfiguredModel(ctx context.Context, r matrixRoute, cfg toolschema.Co
 	case "vercel-anthropic":
 		return adkanthropic.NewModel(adkanthropic.Config{Client: anthropic.NewClient(anthropicoption.WithAPIKey(os.Getenv("AI_GATEWAY_API_KEY")), anthropicoption.WithBaseURL("https://ai-gateway.vercel.sh"), anthropicoption.WithHTTPClient(client), anthropicoption.WithMaxRetries(0)), Model: mc})
 	case "direct":
+		if r.Provider == "anthropic" {
+			return adkanthropic.NewModel(adkanthropic.Config{Client: anthropic.NewClient(anthropicoption.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")), anthropicoption.WithHTTPClient(client), anthropicoption.WithMaxRetries(0)), Model: mc})
+		}
 		return adkopenai.NewModel(adkopenai.Config{Client: openai.NewClient(openaioption.WithAPIKey(os.Getenv("OPENAI_API_KEY")), openaioption.WithHTTPClient(client), openaioption.WithMaxRetries(0)), Model: mc})
 	case "vertex":
 		region := os.Getenv("GOOGLE_CLOUD_LOCATION")

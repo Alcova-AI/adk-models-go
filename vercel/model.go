@@ -8,17 +8,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/Alcova-AI/adk-models-go/internal/jsonschema"
 	"io"
 	"iter"
 	"net/http"
 	"strings"
 
+	"github.com/Alcova-AI/adk-models-go/internal/jsonschema"
+
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal"
+	"github.com/Alcova-AI/adk-models-go/internal/discovery"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	vercelopenai "github.com/Alcova-AI/adk-models-go/internal/vercelopenai"
+	"github.com/Alcova-AI/adk-models-go/tooldiscovery"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
 	"google.golang.org/genai"
 
@@ -57,6 +60,9 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Model.ToolDiscovery == tooldiscovery.Native && f != family.OpenAI && f != family.Anthropic {
+		return nil, fmt.Errorf("native discovery requires OpenAI or Anthropic")
+	}
 	if f == family.OpenAI {
 		if err := cfg.Model.PromptCaching.OpenAI.Validate(); err != nil {
 			return nil, err
@@ -91,6 +97,7 @@ func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMReques
 	if req == nil {
 		return singleError(ErrRequestNil)
 	}
+	req = discovery.CanonicalRequest(ctx, m.config.ToolDiscovery, req)
 	prepared, err := m.schemas.Prepare(ctx, toolschema.Tools(req))
 	if err != nil {
 		return singleError(err)
@@ -156,10 +163,17 @@ func (m *gatewayModel) generateContent(ctx context.Context, req *model.LLMReques
 			return singleError(err)
 		}
 	}
-	if stream {
-		return m.generateStream(ctx, options, includesThoughts(req))
+	plan, err := discovery.New(ctx, m.config.ToolDiscovery, req, prepared, string(m.family))
+	if err != nil {
+		return singleError(err)
 	}
-	return m.generate(ctx, options, includesThoughts(req))
+	if err = plan.VercelWire(&options); err != nil {
+		return singleError(err)
+	}
+	if stream {
+		return discovery.Responses(m.generateStream(ctx, options, includesThoughts(req)), plan)
+	}
+	return discovery.Responses(m.generate(ctx, options, includesThoughts(req)), plan)
 }
 
 func (m *gatewayModel) generate(ctx context.Context, options protocol.CallOptions, includeThoughts bool) iter.Seq2[*model.LLMResponse, error] {

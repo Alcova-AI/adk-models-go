@@ -24,6 +24,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Alcova-AI/adk-models-go/internal/discovery"
+	"github.com/Alcova-AI/adk-models-go/tooldiscovery"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -54,6 +56,7 @@ const (
 type anthropicModel struct {
 	systemInstructionPartIndex *int
 	schemas                    *toolschema.Processor
+	discoveryMode              tooldiscovery.Mode
 	client                     anthropic.Client
 	// canonicalModel is exposed through Name and controls local capabilities.
 	canonicalModel anthropic.Model
@@ -91,6 +94,9 @@ func NewModel(cfg Config) (model.LLM, error) {
 	if f != family.Anthropic && f != family.Compatible && cfg.Model.Vercel == nil {
 		return nil, fmt.Errorf("direct anthropic adapter requires its own model family; cross-family requests require Vercel")
 	}
+	if cfg.Model.ToolDiscovery == tooldiscovery.Native && f != family.Anthropic {
+		return nil, fmt.Errorf("native discovery requires an Anthropic model")
+	}
 	cache := cfg.Model.PromptCaching.Anthropic
 	if f == family.Anthropic {
 		if err := cache.Validate(); err != nil {
@@ -112,8 +118,8 @@ func NewModel(cfg Config) (model.LLM, error) {
 		route = "vercel-anthropic"
 	}
 	return &anthropicModel{
-		schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
-		client:  cfg.Client, canonicalModel: anthropic.Model(cfg.Model.CanonicalModel), requestModel: anthropic.Model(requestModel),
+		discoveryMode: cfg.Model.ToolDiscovery, schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
+		client: cfg.Client, canonicalModel: anthropic.Model(cfg.Model.CanonicalModel), requestModel: anthropic.Model(requestModel),
 		defaultMaxTokens: tokens, reasoning: reasoningConfig{DefaultLevel: cfg.Model.Reasoning.DefaultLevel, OpenAI: cfg.Model.Reasoning.OpenAI, Family: f},
 		promptCaching: cache, systemInstructionPartIndex: cfg.Model.PromptCaching.SystemInstructionPartIndex, vercel: cfg.Model.Vercel, family: f, retrySleep: sleepWithContext,
 	}, nil
@@ -139,6 +145,7 @@ func (m *anthropicModel) GenerateContent(ctx context.Context, req *model.LLMRequ
 }
 
 func (m *anthropicModel) generateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
+	req = discovery.CanonicalRequest(ctx, m.discoveryMode, req)
 	prepared, err := m.schemas.Prepare(ctx, toolschema.Tools(req))
 	if err != nil {
 		return func(yield func(*model.LLMResponse, error) bool) { yield(nil, err) }
@@ -163,7 +170,7 @@ func (m *anthropicModel) generate(ctx context.Context, req *model.LLMRequest, pr
 	}
 
 	applyToolSchemas(&params, prepared)
-	requestOptions, err := m.requestOptions(req, params.MaxTokens)
+	requestOptions, err := m.discoveryOptions(ctx, req, params, prepared)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert request options: %w", err)
 	}
@@ -228,7 +235,7 @@ func (m *anthropicModel) generateStream(ctx context.Context, req *model.LLMReque
 			return
 		}
 		applyToolSchemas(&params, prepared)
-		requestOptions, err := m.requestOptions(req, params.MaxTokens)
+		requestOptions, err := m.discoveryOptions(ctx, req, params, prepared)
 		if err != nil {
 			yield(nil, fmt.Errorf("failed to convert request options: %w", err))
 			return
@@ -613,4 +620,24 @@ func applyToolSchemas(params *anthropic.MessageNewParams, prepared map[string]to
 			}
 		}
 	}
+}
+
+func (m *anthropicModel) discoveryOptions(ctx context.Context, req *model.LLMRequest, params anthropic.MessageNewParams, prepared map[string]toolschema.Prepared) ([]option.RequestOption, error) {
+	opts, err := m.requestOptions(req, params.MaxTokens)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := discovery.New(ctx, m.discoveryMode, req, prepared, string(m.family))
+	if err != nil {
+		return nil, err
+	}
+	if plan == nil {
+		return opts, nil
+	}
+	body, err := discovery.Object(params)
+	if err != nil {
+		return nil, err
+	}
+	plan.AnthropicWire(body)
+	return append(opts, option.WithJSONSet("tools", body["tools"]), option.WithJSONSet("messages", body["messages"])), nil
 }

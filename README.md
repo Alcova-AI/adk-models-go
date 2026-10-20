@@ -22,7 +22,7 @@
 - **You own the client**: pass your own Anthropic or OpenAI SDK client, so authentication, endpoints, retries and HTTP behaviour stay under your control.
 - **Multiple model families through Vercel**: route across providers with typed routing, zero-data-retention and caching settings on `VercelConfig`.
 - **Tool schemas checked before sending**: each adapter rejects JSON Schema rules the provider cannot keep, instead of letting the provider drop them without notice. Unmapped models keep validated schema constraints without a verified provider profile. See the [live schema matrix](testdata/schema-matrix/README.md).
-- **No hidden fallbacks**: the library never switches request format, lowers reasoning effort, weakens retention, or strips caching and retries. Provider errors reach you unchanged.
+- **No hidden provider fallbacks**: the library never changes providers, lowers reasoning effort or weakens retention. Native-discovery compatibility fallbacks emit warnings. Provider errors reach you unchanged.
 
 ---
 
@@ -383,6 +383,31 @@ The adapter logs a warning for each changed rule. Set `ToolSchemas.Warn` to hand
 - Gemini through Vercel receives complete alternatives for type lists such as `["array", "null"]`. Item rules and descriptions stay inside each alternative. Descriptions on explicit alternatives move into their branches. Unsupported combinations of `anyOf` with other assertions stay errors, even with `AllowUnsupported`, so no assertion is lost without notice. Native Vertex keeps its existing JSON Schema representation.
 
 See the [live schema matrix](testdata/schema-matrix/README.md) for tested routes, results, provider limits and how to run the tests.
+
+---
+
+## Native tool discovery (opt-in)
+
+Enable native discovery for the agent that owns tool search:
+
+```go
+cfg.ToolDiscovery = tooldiscovery.Native
+ctx = tooldiscovery.WithCatalog(ctx, tooldiscovery.Catalog{
+    SearchTool:    "search_tools",
+    ResolveResult: resolveLoadedToolNames,
+})
+```
+
+Supported routes are OpenAI Responses, Anthropic Messages and native Vercel for
+those families. Chat Completions and other families reject this option. Omit it
+to keep application-managed loading.
+
+The application still owns search, authorisation and execution. See
+[`Catalog`](tooldiscovery/config.go) for the catalogue and history requirements.
+Keep the authorised catalogue and always-loaded set stable. Native discovery
+preserves the cached prefix, but does not guarantee a cache hit. If loaded tools
+lack discovery history, adapters warn and use ordinary loading, which can cause
+a cache miss.
 
 ---
 

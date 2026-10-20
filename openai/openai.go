@@ -29,10 +29,12 @@ import (
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal"
+	"github.com/Alcova-AI/adk-models-go/internal/discovery"
 	"github.com/Alcova-AI/adk-models-go/internal/family"
 	"github.com/Alcova-AI/adk-models-go/internal/gateway"
 	"github.com/Alcova-AI/adk-models-go/internal/metadata"
 	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
+	"github.com/Alcova-AI/adk-models-go/tooldiscovery"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
 	"google.golang.org/adk/v2/model"
 )
@@ -42,6 +44,7 @@ const defaultMaxTokens = 16384
 type openAIModel struct {
 	systemInstructionPartIndex *int
 	schemas                    *toolschema.Processor
+	discoveryMode              tooldiscovery.Mode
 	client                     openai.Client
 	canonicalModel             shared.ResponsesModel
 	requestModel               shared.ResponsesModel
@@ -62,6 +65,9 @@ func NewModel(cfg Config) (model.LLM, error) {
 	switch cfg.API {
 	case "", APIResponses:
 	case APIChatCompletions:
+		if cfg.Model.ToolDiscovery == tooldiscovery.Native {
+			return nil, fmt.Errorf("native tool discovery requires the Responses API")
+		}
 		return newChatModel(cfg)
 	default:
 		return nil, fmt.Errorf("unsupported OpenAI API %q", cfg.API)
@@ -80,6 +86,9 @@ func NewModel(cfg Config) (model.LLM, error) {
 	}
 	if f != family.OpenAI && f != family.Compatible && cfg.Model.Vercel == nil {
 		return nil, fmt.Errorf("direct openai adapter requires its own model family; cross-family requests require Vercel")
+	}
+	if cfg.Model.ToolDiscovery == tooldiscovery.Native && f != family.OpenAI {
+		return nil, fmt.Errorf("OpenAI native discovery requires an OpenAI model")
 	}
 	cache := cfg.Model.PromptCaching.OpenAI
 	if f == family.OpenAI {
@@ -102,8 +111,8 @@ func NewModel(cfg Config) (model.LLM, error) {
 		route = "vercel-openai"
 	}
 	return &openAIModel{
-		schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
-		client:  cfg.Client, canonicalModel: shared.ResponsesModel(cfg.Model.CanonicalModel), requestModel: shared.ResponsesModel(requestModel),
+		discoveryMode: cfg.Model.ToolDiscovery, schemas: toolschema.New(cfg.Model.ToolSchemas, toolschema.Target{Provider: string(f), Route: route}),
+		client: cfg.Client, canonicalModel: shared.ResponsesModel(cfg.Model.CanonicalModel), requestModel: shared.ResponsesModel(requestModel),
 		defaultMaxTokens: tokens, reasoning: reasoningConfig{DefaultLevel: cfg.Model.Reasoning.DefaultLevel, OpenAI: cfg.Model.Reasoning.OpenAI, Family: f},
 		promptCaching: cache, systemInstructionPartIndex: cfg.Model.PromptCaching.SystemInstructionPartIndex, vercel: cfg.Model.Vercel, family: f,
 	}, nil
@@ -130,6 +139,7 @@ func (m *openAIModel) generateContent(ctx context.Context, req *model.LLMRequest
 	if req == nil {
 		return singleErrorSequence(ErrRequestNil)
 	}
+	req = discovery.CanonicalRequest(ctx, m.discoveryMode, req)
 	prepared, err := m.schemas.Prepare(ctx, toolschema.Tools(req))
 	if err != nil {
 		return singleErrorSequence(err)
@@ -152,10 +162,24 @@ func (m *openAIModel) generateContent(ctx context.Context, req *model.LLMRequest
 	if err != nil {
 		return singleErrorSequence(err)
 	}
-	if stream {
-		return toolschema.RestoreOmissions(m.generateStream(ctx, params, requestOptions, requestIncludesThoughts(req)), prepared)
+	plan, err := discovery.New(ctx, m.discoveryMode, req, prepared, string(m.family))
+	if err != nil {
+		return singleErrorSequence(err)
 	}
-	return toolschema.RestoreOmissions(m.generate(ctx, params, requestOptions, requestIncludesThoughts(req)), prepared)
+	if plan != nil {
+		body, err := discovery.Object(params)
+		if err != nil {
+			return singleErrorSequence(err)
+		}
+		if err = plan.OpenAIWire(body); err != nil {
+			return singleErrorSequence(err)
+		}
+		requestOptions = append(requestOptions, option.WithJSONSet("tools", body["tools"]), option.WithJSONSet("input", body["input"]))
+	}
+	if stream {
+		return toolschema.RestoreOmissions(discovery.Responses(m.generateStream(ctx, params, requestOptions, requestIncludesThoughts(req)), plan), prepared)
+	}
+	return toolschema.RestoreOmissions(discovery.Responses(m.generate(ctx, params, requestOptions, requestIncludesThoughts(req)), plan), prepared)
 }
 
 func (m *openAIModel) convertRequest(req *model.LLMRequest) (responses.ResponseNewParams, error) {
