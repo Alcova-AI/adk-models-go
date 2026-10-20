@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/Alcova-AI/adk-models-go/tooldiscovery"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/genai"
 )
 
 func TestNativeCatalogueStableWithoutMutatingCaller(t *testing.T) {
@@ -19,5 +21,15 @@ func TestNativeCatalogueStableWithoutMutatingCaller(t *testing.T) {
 	}
 	if CanonicalRequest(ctx, tooldiscovery.Application, req) != req {
 		t.Fatal("opt-out changed request")
+	}
+}
+
+func TestInheritedCatalogueWithoutFunctionsLeavesRequestUnchanged(t *testing.T) {
+	for _, config := range []*genai.GenerateContentConfig{nil, {}, {Tools: []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}}}} {
+		req := &model.LLMRequest{Config: config}
+		ctx := tooldiscovery.WithCatalog(t.Context(), tooldiscovery.Catalog{SearchTool: "search"})
+		if got := CanonicalRequest(ctx, tooldiscovery.Native, req); got != req {
+			t.Fatal("request without functions was rewritten")
+		}
 	}
 }

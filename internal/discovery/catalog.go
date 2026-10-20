@@ -36,6 +36,9 @@ func CanonicalRequest(ctx context.Context, mode tooldiscovery.Mode, req *model.L
 		}
 		declarations = append(declarations, t.FunctionDeclarations...)
 	}
+	if len(declarations) == 0 {
+		return req
+	}
 	if slices.ContainsFunc(declarations, func(d *genai.FunctionDeclaration) bool { return d == nil }) {
 		return req
 	}
