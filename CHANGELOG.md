@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.1.12] - Discovery catalogue changes
+
+### Fixed
+
+- Continue conversations when saved discovery results reference tools removed from the current authorised catalogue. Use ordinary loaded-tool replay without restoring unavailable definitions, while retaining saved results and call IDs.
+
 ## [v0.1.11] - Strict tool schema controls
 
 ### Added
