@@ -15,8 +15,8 @@ func TestResponsesOmissionRoundTrip(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object","properties":{"first":{"type":"integer"},"last":{"type":"integer"},"explicit":{"anyOf":[{"type":"integer"},{"type":"null"}]},"required":{"type":"integer"},"rows":{"type":"array","items":{"type":"object","properties":{"value":{"type":"integer"}}}}},"required":["required"]}`)
 	fd := &genai.FunctionDeclaration{Name: "example", ParametersJsonSchema: raw}
 	target := Target{"openai", "vercel-openai"}
-	if _, err := New(Config{}, target).Prepare(t.Context(), tools(fd)); err == nil {
-		t.Fatal("omission encoding requires opt-in")
+	if got, err := New(Config{Warn: quiet}, target).Prepare(t.Context(), tools(fd)); err != nil || *got["example"].Strict {
+		t.Fatalf("strict incompatibility must downgrade without error: %v", err)
 	}
 	prepared, err := New(Config{AllowUnsupported: true, Warn: quiet}, target).Prepare(t.Context(), tools(fd))
 	if err != nil {
@@ -67,7 +67,7 @@ func TestResponsesOmissionRoundTrip(t *testing.T) {
 }
 
 func TestOtherRoutesDoNotEncodeOmissions(t *testing.T) {
-	for _, target := range []Target{{"openai", "direct"}, {"openai", "vercel-native"}, {"anthropic", "vercel-anthropic"}, {"google", "vertex"}} {
+	for _, target := range []Target{{"anthropic", "vercel-anthropic"}, {"google", "vertex"}} {
 		prepared, err := New(Config{AllowUnsupported: true, Warn: quiet}, target).Prepare(t.Context(), tools(&genai.FunctionDeclaration{Name: "example", ParametersJsonSchema: map[string]any{"type": "object", "properties": map[string]any{"last": map[string]any{"type": "integer"}}}}))
 		if err != nil {
 			t.Fatal(err)
@@ -123,5 +123,60 @@ func TestResponsesReferencedOmissionsKeepRequiredAndRealNulls(t *testing.T) {
 	result = prepared["example"].omissions.restore(input).(map[string]any)
 	if _, ok := result["required_item"]; !ok {
 		t.Fatal("required reference was treated as optional")
+	}
+}
+
+func TestOpenAIStrictOptionalRoundTrip(t *testing.T) {
+	for _, route := range []string{"direct", "vercel-openai", "vercel-native", "chat", "vercel-openai-chat"} {
+		t.Run(route, func(t *testing.T) {
+			raw := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"label":{"type":"string"},"count":{"type":"integer"},"enabled":{"type":"boolean"}},"required":["label"]}`)
+			prepared, err := New(Config{}, Target{"openai", route}).Prepare(t.Context(), tools(rawDeclaration(raw)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := prepared["example"]
+			if got.Strict == nil || !*got.Strict {
+				t.Fatal("compatible tool did not enable strict mode")
+			}
+			v := compileTestSchema(t, got.Schema)
+			valid := map[string]any{"label": "example", "count": nil, "enabled": false}
+			if err := v.Validate(valid); err != nil {
+				t.Fatal(err)
+			}
+			restored := got.omissions.restore(valid).(map[string]any)
+			if _, ok := restored["count"]; ok {
+				t.Fatal("omitted count retained")
+			}
+			if restored["enabled"] != false {
+				t.Fatal("explicit false lost")
+			}
+			valid["count"] = float64(0)
+			if got.omissions.restore(valid).(map[string]any)["count"] != float64(0) {
+				t.Fatal("explicit zero lost")
+			}
+			for _, bad := range []map[string]any{{"label": "example", "enabled": false}, {"label": "example", "count": "wrong", "enabled": false}, {"label": "example", "count": nil, "enabled": false, "extra": true}} {
+				if v.Validate(bad) == nil {
+					t.Fatalf("accepted invalid wire input: %v", bad)
+				}
+			}
+		})
+	}
+}
+
+func TestOptionalNullableValuesKeepNonStrictSemantics(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"patch":{"type":["string","null"]}}}`)
+	prepared, err := New(Config{AllowUnsupported: true, Warn: quiet}, Target{"openai", "vercel-native"}).Prepare(t.Context(), tools(rawDeclaration(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := prepared["example"]
+	if got.Strict == nil || *got.Strict {
+		t.Fatal("ambiguous optional nullable field must remain non-strict")
+	}
+	for _, input := range []map[string]any{{}, {"patch": nil}, {"patch": ""}} {
+		output := got.omissions.restore(input).(map[string]any)
+		if _, ok := output["patch"]; ok != (len(input) == 1) {
+			t.Fatal("null/omission distinction lost")
+		}
 	}
 }

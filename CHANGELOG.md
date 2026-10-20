@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.1.11] - Strict tool schema controls
+
+### Added
+
+- Caller-controlled `ToolSchemas.StrictModeHints` for limited provider budgets, with Anthropic nil/empty/ordered-subset semantics and final strict-selection diagnostics. OpenAI ignores hints and keeps all compatible tools strict.
+
+### Fixed
+
+- Enable strict-compatible optional non-nullable inputs on all OpenAI adapter routes using reversible omission encoding; native Vercel now restores omission markers in both streaming and non-streaming tool calls. Genuine nulls and explicit zero/false values remain unchanged.
+- Apply Anthropic strict tool, optional-parameter and union-parameter limits across the complete request, using hint order or declaration order. Strict incompatibility and budget exhaustion now downgrade automatically with warnings, independently of schema-loss permission.
+
 ## [v0.1.10] - Native tool discovery
 
 ### Added
