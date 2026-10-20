@@ -22,7 +22,7 @@ const (
 // All authorised declarations, including deferred ones, must be present in
 // LLMRequest.Config.Tools. The application remains responsible for restricting
 // executable LLMRequest.Tools to loaded tools. Keep the catalogue and AlwaysLoaded
-// set stable for a conversation; adapters canonicalise the declaration order.
+// set stable while authorisation is unchanged; adapters canonicalise the order.
 // Calls without catalogue context retain ordinary tool calling. Native OpenAI
 // discovery rejects named tool-choice restrictions on search or deferred tools;
 // ordinary tool loading preserves those restrictions.
@@ -30,7 +30,9 @@ const (
 // Persist genai.Part.PartMetadata with conversation history: it carries native
 // discovery IDs and namespaces for replay. If discovery history is unavailable,
 // including after compaction or application-side loading, adapters use ordinary
-// loaded tools with a warning. This can cause a cache miss. Catalogue and session
+// loaded tools with a warning. The same fallback applies when a saved search
+// result refers to a tool missing from the current authorised catalogue; removed
+// definitions are never restored. This can cause a cache miss. Catalogue and session
 // data are request-local and are not retained on the shared model instance.
 type Catalog struct {
 	SearchTool    string

@@ -79,13 +79,19 @@ func New(ctx context.Context, mode tooldiscovery.Mode, req *model.LLMRequest, pr
 				if err != nil {
 					return nil, fmt.Errorf("native discovery search result: %w", err)
 				}
+				available := make([]string, 0, len(names))
 				for _, n := range names {
 					if p.Definitions[n] == nil {
-						return nil, fmt.Errorf("native discovery result references unavailable tool %q", n)
+						// The caller can revoke access between turns. Retain the
+						// saved feedback, but never recreate an unavailable tool.
+						p.Fallback = true
+						continue
 					}
+					available = append(available, n)
 				}
+				names = available
 				p.Results[r.ID] = r.Response
-				p.Names[r.ID] = slices.Clone(names)
+				p.Names[r.ID] = names
 				if !p.OpenAI {
 					for _, n := range names {
 						if !p.Always(n) && !seenLoaded[n] {
@@ -141,7 +147,7 @@ func New(ctx context.Context, mode tooldiscovery.Mode, req *model.LLMRequest, pr
 		}
 	}
 	if p.Fallback {
-		slog.WarnContext(ctx, "Native discovery uses ordinary search to preserve loaded tools when native discovery history is unavailable", "tool", c.SearchTool)
+		slog.WarnContext(ctx, "Native discovery uses ordinary search to preserve current loaded tools when native history is unavailable or the catalogue changes", "tool", c.SearchTool)
 	}
 	return p, nil
 }

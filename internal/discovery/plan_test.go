@@ -21,12 +21,16 @@ func TestEmptySearchRetainsNativeDiscovery(t *testing.T) {
 	}
 }
 
-func TestUnknownDiscoveryNameRejected(t *testing.T) {
+func TestUnavailableDiscoveryNameIsNotRestored(t *testing.T) {
 	p, req := fixture(t, "openai", false)
 	p.Catalog.ResolveResult = func(map[string]any) ([]string, error) { return []string{"unauthorised"}, nil }
 	ctx := tooldiscovery.WithCatalog(context.Background(), p.Catalog)
-	if _, err := New(ctx, tooldiscovery.Native, req, p.Prepared, "openai"); err == nil {
-		t.Fatal("accepted unavailable name")
+	plan, err := New(ctx, tooldiscovery.Native, req, p.Prepared, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fallback || plan.Loaded("unauthorised") || len(plan.Names["call1"]) != 0 {
+		t.Fatal("unavailable name was restored or native replay was retained")
 	}
 }
 
