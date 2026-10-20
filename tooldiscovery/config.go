@@ -23,7 +23,9 @@ const (
 // LLMRequest.Config.Tools. The application remains responsible for restricting
 // executable LLMRequest.Tools to loaded tools. Keep the catalogue and AlwaysLoaded
 // set stable for a conversation; adapters canonicalise the declaration order.
-// Calls without catalogue context retain ordinary tool calling.
+// Calls without catalogue context retain ordinary tool calling. Native OpenAI
+// discovery rejects named tool-choice restrictions on search or deferred tools;
+// ordinary tool loading preserves those restrictions.
 //
 // Persist genai.Part.PartMetadata with conversation history: it carries native
 // discovery IDs and namespaces for replay. If discovery history is unavailable,

@@ -110,11 +110,51 @@ func New(ctx context.Context, mode tooldiscovery.Mode, req *model.LLMRequest, pr
 			p.Fallback = true
 		}
 	}
+	// A retained search result alone is insufficient for replay: each discovered
+	// function call also needs the namespace that introduced that function.
+	if p.OpenAI {
+		for _, content := range req.Contents {
+			if content == nil {
+				continue
+			}
+			for _, part := range content.Parts {
+				if part == nil || part.FunctionCall == nil {
+					continue
+				}
+				call := part.FunctionCall
+				if !p.Always(call.Name) && p.Loaded(call.Name) && !p.hasNamespace(call.ID, call.Name) {
+					p.Fallback = true
+				}
+			}
+		}
+	}
+	if p.OpenAI && !p.Fallback && req.Config != nil && req.Config.ToolConfig != nil {
+		choice := req.Config.ToolConfig.FunctionCallingConfig
+		if choice != nil && choice.Mode != genai.FunctionCallingConfigModeNone {
+			for _, name := range choice.AllowedFunctionNames {
+				// Search becomes a provider tool; discovered functions live inside
+				// namespaces. Neither retains an ordinary top-level function name.
+				if name != "" && (name == c.SearchTool || !p.Always(name)) {
+					return nil, fmt.Errorf("native discovery cannot preserve named tool-choice restriction for %q; use ordinary tool loading", name)
+				}
+			}
+		}
+	}
 	if p.Fallback {
-		slog.WarnContext(ctx, "Native discovery uses ordinary search to preserve search feedback or application-loaded tools", "tool", c.SearchTool)
+		slog.WarnContext(ctx, "Native discovery uses ordinary search to preserve loaded tools when native discovery history is unavailable", "tool", c.SearchTool)
 	}
 	return p, nil
 }
+func (p *Plan) hasNamespace(callID, name string) bool {
+	namespace, _ := p.NativeCalls[callID]["namespace"].(string)
+	for id, names := range p.Names {
+		if namespace == p.Namespace(id) && slices.Contains(names, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Plan) LoadedBySearch(name string) bool {
 	for _, names := range p.Names {
 		if slices.Contains(names, name) {
