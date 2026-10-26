@@ -128,12 +128,16 @@ func convertContents(contents []*genai.Content) (responses.ResponseInputParam, e
 		}
 		var messageContent responses.ResponseInputMessageContentListParam
 		var assistantText []string
+		var assistantMetadata MessageMetadata
 		flushMessage := func() {
 			if role == responses.EasyInputMessageRoleAssistant {
 				if message := newOutputMessage(assistantText); message != nil {
+					message.ID = assistantMetadata.ID
+					message.Phase = responses.ResponseOutputMessagePhase(assistantMetadata.Phase)
 					items = append(items, responses.ResponseInputItemUnionParam{OfOutputMessage: message})
 				}
 				assistantText = nil
+				assistantMetadata = MessageMetadata{}
 				return
 			}
 			if message := newInputMessage(role, messageContent); message != nil {
@@ -162,6 +166,12 @@ func convertContents(contents []*genai.Content) (responses.ResponseInputParam, e
 				continue
 			case part.Text != "":
 				if role == responses.EasyInputMessageRoleAssistant {
+					metadata, _ := MessageMetadataFromPart(part)
+					// Adjacent fragments belong together only within the same message.
+					if len(assistantText) > 0 && metadata != assistantMetadata {
+						flushMessage()
+					}
+					assistantMetadata = metadata
 					assistantText = append(assistantText, part.Text)
 				} else {
 					messageContent = append(messageContent, inputText(part.Text))
