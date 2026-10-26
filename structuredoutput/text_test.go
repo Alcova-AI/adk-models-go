@@ -1,4 +1,4 @@
-package structuredoutput_test
+package structuredoutput
 
 import (
 	"encoding/json"
@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
-	"github.com/Alcova-AI/adk-models-go/structuredoutput"
 	"google.golang.org/genai"
 )
 
@@ -47,7 +46,7 @@ func TestTextCandidates(t *testing.T) {
 			if err := json.Unmarshal(before, &restored); err != nil {
 				t.Fatal(err)
 			}
-			got, err := structuredoutput.TextCandidates(&restored)
+			got, err := textCandidates(&restored)
 			if (err != nil) != tc.fail {
 				t.Fatalf("error=%v, want failure=%v", err, tc.fail)
 			}
@@ -63,7 +62,7 @@ func TestTextCandidates(t *testing.T) {
 			}
 		})
 	}
-	if _, err := structuredoutput.TextCandidates(nil); err == nil {
+	if _, err := textCandidates(nil); err == nil {
 		t.Fatal("nil content accepted")
 	}
 }

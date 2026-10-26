@@ -659,8 +659,8 @@ func TestNativeTextMessagePhases(t *testing.T) {
 			if final == nil || len(final.Content.Parts) != 2 {
 				t.Fatalf("final=%#v", final)
 			}
-			selected, err := structuredoutput.TextCandidates(final.Content)
-			if err != nil || len(selected) != 1 || selected[0] != `{"section":"complete"}` {
+			selected, err := structuredoutput.ExtractJSON[map[string]string](final.Content)
+			if err != nil || selected == nil || (*selected)["section"] != "complete" {
 				t.Fatalf("selected=%#v error=%v", selected, err)
 			}
 			for i, p := range final.Content.Parts {

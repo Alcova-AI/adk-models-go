@@ -1,7 +1,7 @@
 // Copyright 2026 Alcova AI
 // Licensed under the Apache License, Version 2.0.
 
-// Package structuredoutput selects response text for structured-output callers.
+// Package structuredoutput extracts typed JSON from model responses.
 // Provider-specific message phases remain an adapter implementation detail.
 package structuredoutput
 
@@ -13,15 +13,15 @@ import (
 	"google.golang.org/genai"
 )
 
-// TextCandidates returns whole-text candidates for JSON decoding, in order.
+// textCandidates returns whole-text candidates for JSON decoding, in order.
 // For explicitly phased output it returns only the selected final message,
 // joining fragments of that message. Commentary stays in the original content.
 // Missing or ambiguous final messages fail rather than falling back to drafts.
 //
 // Unphased responses retain the legacy combined-text-first fallback to individual
-// text parts. Thought parts are excluded in both cases. The caller owns JSON
-// decoding and schema validation; this function does not modify content.
-func TextCandidates(content *genai.Content) ([]string, error) {
+// text parts. Thought parts are excluded in both cases. ExtractJSON owns JSON
+// decoding; callers own application schema validation. Content is not modified.
+func textCandidates(content *genai.Content) ([]string, error) {
 	if content == nil {
 		return nil, fmt.Errorf("content is nil")
 	}
