@@ -1,9 +1,11 @@
 package structuredoutput
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"reflect"
@@ -321,5 +323,270 @@ func TestExtractJSONFinalMessageIdentity(t *testing.T) {
 				t.Fatal("extraction mutated response")
 			}
 		})
+	}
+}
+
+// TestPhaseHistoryLiveReplay exercises real three-call tool conversations. The
+// model must emit its own commentary/final phases; the test never injects them.
+func TestPhaseHistoryLiveReplay(t *testing.T) {
+	if os.Getenv("ADK_PHASE_REPLAY_LIVE") != "1" {
+		t.Skip("set ADK_PHASE_REPLAY_LIVE=1 for live phase replay")
+	}
+	for _, key := range []string{"OPENAI_API_KEY", "AI_GATEWAY_API_KEY"} {
+		if os.Getenv(key) == "" {
+			t.Fatalf("missing %s", key)
+		}
+	}
+	for _, route := range []string{"direct-responses", "vercel-responses", "vercel-native"} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", route, stream), func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+				defer cancel()
+				capture := &phaseReplayCapture{base: http.DefaultTransport}
+				client := &http.Client{Transport: capture, Timeout: 90 * time.Second}
+				mc := adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna", RequestModel: "gpt-5.6-luna", DefaultMaxOutputTokens: 4096, Reasoning: adkmodels.ReasoningConfig{DefaultLevel: genai.ThinkingLevelLow}}
+				if route != "direct-responses" {
+					mc.RequestModel = "openai/gpt-5.6-luna"
+					mc.Vercel = &adkmodels.VercelConfig{Only: []string{"openai"}, ZeroDataRetention: true}
+				}
+				var llm model.LLM
+				var err error
+				if route == "vercel-native" {
+					llm, err = adkvercel.NewModel(adkvercel.Config{APIKey: os.Getenv("AI_GATEWAY_API_KEY"), HTTPClient: client, Model: mc})
+				} else {
+					key, base := os.Getenv("OPENAI_API_KEY"), "https://api.openai.com/v1"
+					if route == "vercel-responses" {
+						key, base = os.Getenv("AI_GATEWAY_API_KEY"), "https://ai-gateway.vercel.sh/v1"
+					}
+					sdk := openai.NewClient(option.WithAPIKey(key), option.WithBaseURL(base), option.WithMaxRetries(0), option.WithHTTPClient(client))
+					llm, err = adkopenai.NewModel(adkopenai.Config{Client: sdk, API: adkopenai.APIResponses, Model: mc})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				config := &genai.GenerateContentConfig{MaxOutputTokens: 4096, Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "lookup_token", Description: "Read the secret synthetic test token. Call exactly once before answering.", Parameters: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{}}}}}}, ResponseSchema: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{"token": {Type: genai.TypeString}, "status": {Type: genai.TypeString}}, Required: []string{"token", "status"}}}
+				history := []*genai.Content{genai.NewContentFromText("This is a synthetic integration test. Retrieve the token using lookup_token. Before calling the tool, send the user one short progress update in a separate commentary message, using JSON with token empty and status checking. Then call lookup_token exactly once. After receiving its result, return a final JSON answer with the exact token and status complete. Do not invent the token. Do not skip the progress update.", genai.RoleUser)}
+				marker := fmt.Sprintf("Cobalt-Replay-%s-%t", route, stream)
+				phases := []string{}
+				partials := []int{}
+				for turn := 0; turn < 3; turn++ {
+					requestIndex := len(capture.calls)
+					var final *model.LLMResponse
+					chunks := 0
+					for resp, e := range llm.GenerateContent(ctx, &model.LLMRequest{Contents: history, Config: config}, stream) {
+						if e != nil {
+							t.Fatal(e)
+						}
+						if resp == nil {
+							continue
+						}
+						if resp.Partial {
+							chunks++
+						} else {
+							final = resp
+						}
+					}
+					if final == nil || final.Content == nil {
+						t.Fatalf("turn %d has no complete response", turn)
+					}
+					if len(capture.calls) != requestIndex+1 || capture.calls[requestIndex].Status != 200 {
+						t.Fatalf("unexpected requests/statuses: %#v", capture.calls)
+					}
+					partials = append(partials, chunks)
+					if stream && chunks == 0 {
+						t.Fatalf("turn %d had no streaming partials", turn)
+					}
+					if turn > 0 {
+						assertPhaseReplayWire(t, capture.calls[requestIndex].Request, history, route == "vercel-native")
+					}
+					// Exercise the same JSON persistence boundary as saved session history.
+					raw, e := json.Marshal(final.Content)
+					if e != nil {
+						t.Fatal(e)
+					}
+					restored := new(genai.Content)
+					if e = json.Unmarshal(raw, restored); e != nil {
+						t.Fatal(e)
+					}
+					calls := []*genai.FunctionCall{}
+					for _, part := range restored.Parts {
+						if m, ok := converters.MessageMetadataFromPart(part); ok && m.Phase != "" {
+							phases = append(phases, m.Phase)
+						}
+						if part.FunctionCall != nil {
+							calls = append(calls, part.FunctionCall)
+						}
+					}
+					history = append(history, restored)
+					if turn == 0 {
+						if len(calls) != 1 || calls[0].Name != "lookup_token" {
+							t.Fatalf("first turn must call lookup_token once: %s", raw)
+						}
+						found := false
+						for _, p := range restored.Parts {
+							m, _ := converters.MessageMetadataFromPart(p)
+							if m.Phase == "commentary" && m.ID != "" {
+								found = true
+							}
+						}
+						if !found {
+							t.Fatalf("model did not produce commentary metadata; cannot prove commentary replay: %s", raw)
+						}
+						history = append(history, &genai.Content{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: calls[0].Name, ID: calls[0].ID, Response: map[string]any{"token": marker}}}}})
+					} else {
+						if len(calls) != 0 {
+							t.Fatalf("unexpected extra tool call on turn %d", turn)
+						}
+						got, e := ExtractJSON[struct {
+							Token  string `json:"token"`
+							Status string `json:"status"`
+						}](restored)
+						if e != nil || got == nil || got.Token != marker || got.Status != "complete" {
+							t.Fatalf("turn %d final=%s extracted=%+v error=%v", turn, raw, got, e)
+						}
+						found := false
+						for _, p := range restored.Parts {
+							m, _ := converters.MessageMetadataFromPart(p)
+							if m.Phase == "final_answer" && m.ID != "" {
+								found = true
+							}
+						}
+						if !found {
+							t.Fatalf("turn %d missing final_answer phase: %s", turn, raw)
+						}
+						if turn == 1 {
+							history = append(history, genai.NewContentFromText("Without using any tools, repeat the exact token you just retrieved as JSON with status complete.", genai.RoleUser))
+						}
+					}
+				}
+				if dir := os.Getenv("ADK_PHASE_REPLAY_PROOF_DIR"); dir != "" {
+					if err := os.MkdirAll(dir, 0700); err != nil {
+						t.Fatal(err)
+					}
+					data, err := json.MarshalIndent(map[string]any{"route": route, "stream": stream, "model": mc.RequestModel, "reasoning": "LOW", "phases": phases, "partials": partials, "calls": capture.calls, "history": history}, "", "  ")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err = os.WriteFile(fmt.Sprintf("%s/%s-%t.json", dir, route, stream), data, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Logf("route=%s stream=%t real_calls=%d tool_results=1 replay_assertions=2 phases=%v partials=%v token_verified=true", route, stream, len(capture.calls), phases, partials)
+			})
+		}
+	}
+}
+
+type phaseReplayCall struct {
+	Request  json.RawMessage `json:"request"`
+	Response string          `json:"response"`
+	Status   int             `json:"status"`
+}
+type phaseReplayCapture struct {
+	base  http.RoundTripper
+	calls []*phaseReplayCall
+}
+type phaseReplayReadCloser struct {
+	io.ReadCloser
+	record *phaseReplayCall
+}
+
+func (r *phaseReplayReadCloser) Read(p []byte) (int, error) {
+	n, e := r.ReadCloser.Read(p)
+	r.record.Response += string(p[:n])
+	return n, e
+}
+func (c *phaseReplayCapture) RoundTrip(req *http.Request) (*http.Response, error) {
+	raw, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	req.Body.Close()
+	req.Body = io.NopCloser(bytes.NewReader(raw))
+	call := &phaseReplayCall{Request: raw}
+	c.calls = append(c.calls, call)
+	response, err := c.base.RoundTrip(req)
+	if err != nil {
+		return response, err
+	}
+	call.Status = response.StatusCode
+	response.Body = &phaseReplayReadCloser{ReadCloser: response.Body, record: call}
+	return response, nil
+}
+
+func assertPhaseReplayWire(t *testing.T, raw []byte, history []*genai.Content, native bool) {
+	t.Helper()
+	type message struct{ ID, Phase, Text string }
+	var want []message
+	for _, content := range history {
+		if content.Role != "model" {
+			continue
+		}
+		for _, part := range content.Parts {
+			if part == nil || part.Thought || part.Text == "" {
+				continue
+			}
+			m, _ := converters.MessageMetadataFromPart(part)
+			if m.ID == "" || m.Phase == "" {
+				t.Fatalf("cannot prove replay of unlabelled generated text: %#v", part)
+			}
+			if len(want) > 0 && want[len(want)-1].ID == m.ID && want[len(want)-1].Phase == m.Phase {
+				want[len(want)-1].Text += part.Text
+			} else {
+				want = append(want, message{m.ID, m.Phase, part.Text})
+			}
+		}
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	var got []message
+	if native {
+		prompt, _ := body["prompt"].([]any)
+		for _, entry := range prompt {
+			m := entry.(map[string]any)
+			if m["role"] != "assistant" {
+				continue
+			}
+			parts, _ := m["content"].([]any)
+			textParts := 0
+			for _, entry := range parts {
+				p := entry.(map[string]any)
+				if p["type"] != "text" {
+					continue
+				}
+				textParts++
+				if textParts > 1 {
+					t.Fatal("native history merged distinct generated text messages")
+				}
+				opts, _ := p["providerOptions"].(map[string]any)
+				o, _ := opts["openai"].(map[string]any)
+				id, _ := o["itemId"].(string)
+				phase, _ := o["phase"].(string)
+				text, _ := p["text"].(string)
+				got = append(got, message{id, phase, text})
+			}
+		}
+	} else {
+		input, _ := body["input"].([]any)
+		for _, entry := range input {
+			m := entry.(map[string]any)
+			if m["role"] != "assistant" {
+				continue
+			}
+			id, _ := m["id"].(string)
+			phase, _ := m["phase"].(string)
+			text := ""
+			parts, _ := m["content"].([]any)
+			for _, p := range parts {
+				v, _ := p.(map[string]any)["text"].(string)
+				text += v
+			}
+			got = append(got, message{id, phase, text})
+		}
+	}
+	if len(want) == 0 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("history replay mismatch: got=%+v want=%+v", got, want)
 	}
 }
