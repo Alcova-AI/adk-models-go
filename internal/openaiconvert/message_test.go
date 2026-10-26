@@ -1,4 +1,4 @@
-package adkmodels
+package converters
 
 import (
 	"encoding/json"

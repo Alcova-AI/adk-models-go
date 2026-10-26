@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
 	"io"
 	"net/http"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
+	"github.com/Alcova-AI/adk-models-go/structuredoutput"
 	"github.com/Alcova-AI/adk-models-go/toolschema"
 
 	"google.golang.org/adk/v2/model"
@@ -646,7 +648,7 @@ func TestNativeTextMessagePhases(t *testing.T) {
 					t.Fatal(e)
 				}
 				if r.Partial {
-					m, ok := adkmodels.MessageMetadataFromPart(r.Content.Parts[0])
+					m, ok := converters.MessageMetadataFromPart(r.Content.Parts[0])
 					if !ok || m.Phase == "" {
 						t.Fatalf("partial metadata=%#v", m)
 					}
@@ -657,8 +659,12 @@ func TestNativeTextMessagePhases(t *testing.T) {
 			if final == nil || len(final.Content.Parts) != 2 {
 				t.Fatalf("final=%#v", final)
 			}
+			selected, err := structuredoutput.TextCandidates(final.Content)
+			if err != nil || len(selected) != 1 || selected[0] != `{"section":"complete"}` {
+				t.Fatalf("selected=%#v error=%v", selected, err)
+			}
 			for i, p := range final.Content.Parts {
-				m, ok := adkmodels.MessageMetadataFromPart(p)
+				m, ok := converters.MessageMetadataFromPart(p)
 				phase, id := "commentary", "msg_c"
 				want := `{"section":""}`
 				if i == 1 {

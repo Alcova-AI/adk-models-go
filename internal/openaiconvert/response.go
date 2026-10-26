@@ -21,7 +21,6 @@ import (
 	"math"
 	"strings"
 
-	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal/discovery"
 	"github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
@@ -144,12 +143,12 @@ func convertOutputItemsWithThoughts(items []responses.ResponseOutputItemUnion, i
 				case "output_text":
 					if content.Text != "" {
 						part := &genai.Part{Text: content.Text}
-						adkmodels.SetMessageMetadata(part, adkmodels.MessageMetadata{ID: item.ID, Phase: string(item.Phase)})
+						SetMessageMetadata(part, MessageMetadata{ID: item.ID, Phase: string(item.Phase)})
 						parts = append(parts, part)
 					}
 				case "refusal":
 					part := &genai.Part{Text: content.Refusal}
-					adkmodels.SetMessageMetadata(part, adkmodels.MessageMetadata{ID: item.ID, Phase: string(item.Phase)})
+					SetMessageMetadata(part, MessageMetadata{ID: item.ID, Phase: string(item.Phase)})
 					parts = append(parts, part)
 				default:
 					return nil, fmt.Errorf("%w: %q", ErrUnsupportedMessageContentType, content.Type)

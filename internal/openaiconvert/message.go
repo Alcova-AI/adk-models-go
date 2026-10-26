@@ -1,18 +1,20 @@
 // Copyright 2026 Alcova AI
 // Licensed under the Apache License, Version 2.0.
 
-package adkmodels
+package converters
 
 import "google.golang.org/genai"
 
-const MessageMetadataKey = "adkmodels.message"
+// MessageMetadataKey scopes these message facts to OpenAI Responses, including
+// OpenAI messages carried by the native Vercel transport.
+const MessageMetadataKey = "adkmodels.openai.message"
 
 const (
 	MessagePhaseCommentary  = "commentary"
 	MessagePhaseFinalAnswer = "final_answer"
 )
 
-// MessageMetadata identifies the provider message that produced a text part.
+// MessageMetadata identifies the OpenAI message that produced a text part.
 // Adapters preserve these facts without selecting or removing output.
 type MessageMetadata struct {
 	ID    string `json:"id,omitempty"`

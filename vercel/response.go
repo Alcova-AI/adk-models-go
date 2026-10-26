@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
 	"math"
 	"strings"
 
@@ -180,7 +181,7 @@ func attachMetadata(response *model.LLMResponse, providerMetadata map[string]any
 // Only OpenAI currently supplies message phases on native text parts.
 func attachTextMetadata(part *genai.Part, id string, providers map[string]any) {
 	if fields, ok := providers["openai"].(map[string]any); ok {
-		value, _ := adkmodels.MessageMetadataFromPart(part)
+		value, _ := converters.MessageMetadataFromPart(part)
 		if itemID, ok := fields["itemId"].(string); ok && itemID != "" {
 			value.ID = itemID
 		} else if value.ID == "" {
@@ -189,6 +190,6 @@ func attachTextMetadata(part *genai.Part, id string, providers map[string]any) {
 		if phase, ok := fields["phase"].(string); ok && phase != "" {
 			value.Phase = phase
 		}
-		adkmodels.SetMessageMetadata(part, value)
+		converters.SetMessageMetadata(part, value)
 	}
 }

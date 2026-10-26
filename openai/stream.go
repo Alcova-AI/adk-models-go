@@ -18,9 +18,9 @@ package adkopenai
 import (
 	"encoding/json"
 	"fmt"
+	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
 	"strings"
 
-	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/Alcova-AI/adk-models-go/internal/discovery"
 	"github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
@@ -29,7 +29,7 @@ import (
 // streamTranslator helps us process OpenAI streaming events by buffering
 // function arguments until a complete function call is received.
 type streamTranslator struct {
-	messages     map[string]adkmodels.MessageMetadata
+	messages     map[string]converters.MessageMetadata
 	functionArgs map[string]*strings.Builder
 	itemToCallID map[string]string
 	itemToName   map[string]string
@@ -37,7 +37,7 @@ type streamTranslator struct {
 
 func newStreamTranslator() *streamTranslator {
 	return &streamTranslator{
-		messages:     make(map[string]adkmodels.MessageMetadata),
+		messages:     make(map[string]converters.MessageMetadata),
 		functionArgs: make(map[string]*strings.Builder),
 		itemToCallID: make(map[string]string),
 		itemToName:   make(map[string]string),
@@ -57,7 +57,7 @@ func (t *streamTranslator) process(evt responses.ResponseStreamEventUnion) (*gen
 		part := &genai.Part{Text: delta.Delta}
 		value := t.messages[delta.ItemID]
 		value.ID = delta.ItemID
-		adkmodels.SetMessageMetadata(part, value)
+		converters.SetMessageMetadata(part, value)
 		return singlePartResponse(part), nil
 	case responseReasoningTextDelta:
 		delta := evt.AsResponseReasoningTextDelta()
@@ -102,7 +102,7 @@ func (t *streamTranslator) process(evt responses.ResponseStreamEventUnion) (*gen
 	case responseOutputItemAdded:
 		added := evt.AsResponseOutputItemAdded()
 		if added.Item.Type == "message" {
-			t.messages[added.Item.ID] = adkmodels.MessageMetadata{ID: added.Item.ID, Phase: string(added.Item.Phase)}
+			t.messages[added.Item.ID] = converters.MessageMetadata{ID: added.Item.ID, Phase: string(added.Item.Phase)}
 		}
 		if added.Item.ID != "" && added.Item.CallID != "" {
 			t.itemToCallID[added.Item.ID] = added.Item.CallID

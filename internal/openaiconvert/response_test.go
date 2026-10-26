@@ -21,7 +21,6 @@ import (
 	"strings"
 	"testing"
 
-	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/google/go-cmp/cmp"
 	"github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
@@ -713,7 +712,7 @@ func TestResponsePreservesMessagePhases(t *testing.T) {
 		t.Fatalf("parts=%d", len(got.Content.Parts))
 	}
 	for i, p := range got.Content.Parts {
-		m, ok := adkmodels.MessageMetadataFromPart(p)
+		m, ok := MessageMetadataFromPart(p)
 		phase, id := "final_answer", "msg_f"
 		if i == 0 {
 			phase, id = "commentary", "msg_c"

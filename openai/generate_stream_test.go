@@ -176,7 +176,7 @@ func TestStreamingTextDeltaPreservesMessagePhase(t *testing.T) {
 		if got != nil {
 			emitted++
 			p := got.Candidates[0].Content.Parts[0]
-			m, ok := adkmodels.MessageMetadataFromPart(p)
+			m, ok := converters.MessageMetadataFromPart(p)
 			if !ok || m.ID != "msg_c" || m.Phase != "commentary" || p.Text != `{"section":""}` {
 				t.Fatalf("part=%#v metadata=%#v", p, m)
 			}
