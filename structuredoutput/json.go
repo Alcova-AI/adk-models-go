@@ -19,7 +19,9 @@ import (
 // rejects missing or ambiguous final messages without falling back to drafts.
 // Unphased responses retain combined-text-first, then individual-part fallbacks.
 // Each decode attempt starts with a fresh T so failed attempts cannot leak fields.
-// Responses must contain bare JSON; prose and Markdown fences are not stripped.
+// Multiple final parts must share a non-empty message ID; a single final part
+// may omit the ID. Responses must contain bare JSON; prose and Markdown fences
+// are not stripped.
 // Application schema validation and error logging remain the caller's responsibility.
 func ExtractJSON[T any](content *genai.Content) (*T, error) {
 	candidates, err := textCandidates(content)
@@ -52,15 +54,16 @@ func textCandidates(content *genai.Content) ([]string, error) {
 	}
 	phased := false
 	for _, part := range content.Parts {
-		if part != nil && !part.Thought && part.Text != "" {
+		if part != nil && !part.Thought {
 			m, _ := converters.MessageMetadataFromPart(part)
 			phased = phased || m.Phase != ""
 		}
 	}
 	var messageID string
+	finalParts := 0
 	var texts []string
 	for _, part := range content.Parts {
-		if part == nil || part.Thought || part.Text == "" {
+		if part == nil || part.Thought {
 			continue
 		}
 		if phased {
@@ -69,14 +72,21 @@ func textCandidates(content *genai.Content) ([]string, error) {
 				continue
 			}
 			if m.Phase != converters.MessagePhaseFinalAnswer {
+				if part.Text == "" && m.Phase == "" {
+					continue
+				}
 				return nil, fmt.Errorf("structured output contains text without a final-answer phase")
 			}
-			if messageID != "" && m.ID != "" && messageID != m.ID {
-				return nil, fmt.Errorf("structured output contains multiple final-answer messages")
+			// Empty final parts still establish message identity. Multiple parts
+			// can be joined only when every part identifies the same message.
+			if finalParts > 0 && (messageID == "" || m.ID == "" || messageID != m.ID) {
+				return nil, fmt.Errorf("structured output contains ambiguous final-answer messages")
 			}
-			if m.ID != "" {
-				messageID = m.ID
-			}
+			messageID = m.ID
+			finalParts++
+		}
+		if part.Text == "" {
+			continue
 		}
 		texts = append(texts, part.Text)
 	}

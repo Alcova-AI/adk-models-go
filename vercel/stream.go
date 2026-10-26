@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"maps"
 	"strings"
 
 	adkmodels "github.com/Alcova-AI/adk-models-go"
@@ -133,7 +134,7 @@ func (s *streamState) convert(part protocol.StreamPart, includeThoughts bool) (*
 		text := s.startText(part.ID)
 		text.Text += part.Delta
 		attachTextMetadata(text, part.ID, part.ProviderMetadata)
-		return partial(&genai.Part{Text: part.Delta, PartMetadata: text.PartMetadata}), false, nil
+		return partial(&genai.Part{Text: part.Delta, PartMetadata: maps.Clone(text.PartMetadata)}), false, nil
 	case "reasoning-start":
 		s.reasoning[part.ID] = &strings.Builder{}
 		reasoningPart := &genai.Part{Thought: true}

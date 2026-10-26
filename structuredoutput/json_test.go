@@ -52,6 +52,11 @@ func TestExtractJSON(t *testing.T) {
 		{"empty commentary before final", &genai.Content{Parts: []*genai.Part{part(`{"key":""}`, "c", "commentary"), part(`{"key":"complete"}`, "f", "final_answer")}}, answer{Key: "complete"}, false},
 		{"PDF disclaimer before final", &genai.Content{Parts: []*genai.Part{part(`{"key":"Cannot access PDF"}`, "c", "commentary"), part(`{"key":"complete"}`, "f", "final_answer")}}, answer{Key: "complete"}, false},
 		{"fragmented final", &genai.Content{Parts: []*genai.Part{part(`{"key":`, "f", "final_answer"), part(`"complete"}`, "f", "final_answer")}}, answer{Key: "complete"}, false},
+		{"empty final blocks unphased draft", &genai.Content{Parts: []*genai.Part{{Text: `{"key":"draft"}`}, part("", "f", "final_answer")}}, answer{}, true},
+		{"empty commentary blocks unphased fallback", &genai.Content{Parts: []*genai.Part{{Text: `{"key":"draft"}`}, part("", "c", "commentary")}}, answer{}, true},
+		{"empty final only fails", &genai.Content{Parts: []*genai.Part{part("", "f", "final_answer")}}, answer{}, true},
+		{"empty final fragment with shared ID", &genai.Content{Parts: []*genai.Part{part("", "f", "final_answer"), part(`{"key":"complete"}`, "f", "final_answer")}}, answer{Key: "complete"}, false},
+		{"empty phased thought is ignored", &genai.Content{Parts: []*genai.Part{{Thought: true, PartMetadata: map[string]any{converters.MessageMetadataKey: map[string]any{"phase": "final_answer"}}}, {Text: `{"key":"complete"}`}}}, answer{Key: "complete"}, false},
 		{"commentary only fails", &genai.Content{Parts: []*genai.Part{part(`{"key":"draft"}`, "c", "commentary")}}, answer{}, true},
 		{"multiple finals fail", &genai.Content{Parts: []*genai.Part{part(`{"key":"first"}`, "f1", "final_answer"), part(`{"key":"second"}`, "f2", "final_answer")}}, answer{}, true},
 		{"malformed final cannot fall back to draft", &genai.Content{Parts: []*genai.Part{part(`{"key":"draft"}`, "c", "commentary"), part(`{`, "f", "final_answer")}}, answer{}, true},
@@ -266,4 +271,55 @@ func (t *jsonLiveTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		t.statuses = append(t.statuses, response.StatusCode)
 	}
 	return response, err
+}
+
+func TestExtractJSONFinalMessageIdentity(t *testing.T) {
+	part := func(text, id string) *genai.Part {
+		p := &genai.Part{Text: text}
+		converters.SetMessageMetadata(p, converters.MessageMetadata{ID: id, Phase: converters.MessagePhaseFinalAnswer})
+		return p
+	}
+	for _, tc := range []struct {
+		name  string
+		parts []*genai.Part
+		want  int
+		fail  bool
+	}{
+		{"single final without ID", []*genai.Part{part("1", "")}, 1, false},
+		{"fragments with shared ID", []*genai.Part{part("1", "f"), part("2", "f")}, 12, false},
+		{"both IDs missing", []*genai.Part{part("1", ""), part("2", "")}, 0, true},
+		{"first ID missing", []*genai.Part{part("1", ""), part("2", "f")}, 0, true},
+		{"last ID missing", []*genai.Part{part("1", "f"), part("2", "")}, 0, true},
+		{"different IDs", []*genai.Part{part("1", "f1"), part("2", "f2")}, 0, true},
+		{"empty first final without ID", []*genai.Part{part("", ""), part("1", "f")}, 0, true},
+		{"empty last final without ID", []*genai.Part{part("1", "f"), part("", "")}, 0, true},
+		{"empty final with different ID", []*genai.Part{part("1", "f1"), part("", "f2")}, 0, true},
+		{"empty fragment with shared ID", []*genai.Part{part("1", "f"), part("", "f")}, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := &genai.Content{Parts: tc.parts}
+			before, err := json.Marshal(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var restored genai.Content
+			if err := json.Unmarshal(before, &restored); err != nil {
+				t.Fatal(err)
+			}
+			got, err := ExtractJSON[int](&restored)
+			if (err != nil) != tc.fail {
+				t.Fatalf("result=%v error=%v want failure=%t", got, err, tc.fail)
+			}
+			if !tc.fail && (got == nil || *got != tc.want) {
+				t.Fatalf("result=%v want=%d", got, tc.want)
+			}
+			after, err := json.Marshal(restored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("extraction mutated response")
+			}
+		})
+	}
 }
