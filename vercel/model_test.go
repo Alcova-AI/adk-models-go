@@ -613,3 +613,62 @@ func TestStrictNativeArgumentsRestoreOnlyOmissionMarkers(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTextMessagePhases(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if !stream {
+					return jsonResponse(r, `{"content":[{"type":"text","text":"{\"section\":\"\"}","providerMetadata":{"openai":{"itemId":"msg_c","phase":"commentary"}}},{"type":"text","text":"{\"section\":\"complete\"}","providerMetadata":{"openai":{"itemId":"msg_f","phase":"final_answer"}}}],"finishReason":{"unified":"stop"}}`), nil
+				}
+				events := []string{
+					`{"type":"text-start","id":"c","providerMetadata":{"openai":{"itemId":"msg_c","phase":"commentary"}}}`,
+					`{"type":"text-delta","id":"c","delta":"{\"section\":\"\"}","providerMetadata":{"openai":{"itemId":"msg_c"}}}`,
+					`{"type":"text-end","id":"c"}`,
+					`{"type":"text-start","id":"f","providerMetadata":{"openai":{"itemId":"msg_f","phase":"final_answer"}}}`,
+					`{"type":"text-delta","id":"f","delta":"{\"section\":\"complete\"}"}`,
+					`{"type":"text-end","id":"f"}`,
+					`{"type":"finish","finishReason":{"unified":"stop"}}`,
+				}
+				var b strings.Builder
+				for _, e := range events {
+					fmt.Fprintf(&b, "data: %s\n\n", e)
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(b.String())), Request: r}, nil
+			})
+			llm, err := NewModel(Config{APIKey: "test", HTTPClient: &http.Client{Transport: transport}, Model: adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna", RequestModel: "openai/gpt-5.6-luna"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var final *model.LLMResponse
+			for r, e := range llm.GenerateContent(t.Context(), &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("notes", genai.RoleUser)}}, stream) {
+				if e != nil {
+					t.Fatal(e)
+				}
+				if r.Partial {
+					m, ok := adkmodels.MessageMetadataFromPart(r.Content.Parts[0])
+					if !ok || m.Phase == "" {
+						t.Fatalf("partial metadata=%#v", m)
+					}
+				} else {
+					final = r
+				}
+			}
+			if final == nil || len(final.Content.Parts) != 2 {
+				t.Fatalf("final=%#v", final)
+			}
+			for i, p := range final.Content.Parts {
+				m, ok := adkmodels.MessageMetadataFromPart(p)
+				phase, id := "commentary", "msg_c"
+				want := `{"section":""}`
+				if i == 1 {
+					phase, id = "final_answer", "msg_f"
+					want = `{"section":"complete"}`
+				}
+				if !ok || m.Phase != phase || m.ID != id || p.Text != want {
+					t.Fatalf("part %d=%#v metadata=%#v", i, p, m)
+				}
+			}
+		})
+	}
+}

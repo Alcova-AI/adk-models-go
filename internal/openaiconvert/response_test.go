@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	adkmodels "github.com/Alcova-AI/adk-models-go"
 	"github.com/google/go-cmp/cmp"
 	"github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
@@ -696,5 +697,32 @@ func TestConvertLogprobs(t *testing.T) {
 				t.Errorf("convertLogprobs() mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestResponsePreservesMessagePhases(t *testing.T) {
+	var response responses.Response
+	if err := json.Unmarshal([]byte(`{"id":"resp_phases","status":"completed","output":[{"type":"message","id":"msg_c","phase":"commentary","content":[{"type":"output_text","text":"{\"section\":\"\"}"}]},{"type":"message","id":"msg_f","phase":"final_answer","content":[{"type":"output_text","text":"{\"section\":"},{"type":"output_text","text":"\"complete\"}"}]}]}`), &response); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResponseToLLMResponse(&response, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Content.Parts) != 3 {
+		t.Fatalf("parts=%d", len(got.Content.Parts))
+	}
+	for i, p := range got.Content.Parts {
+		m, ok := adkmodels.MessageMetadataFromPart(p)
+		phase, id := "final_answer", "msg_f"
+		if i == 0 {
+			phase, id = "commentary", "msg_c"
+		}
+		if !ok || m.Phase != phase || m.ID != id {
+			t.Fatalf("part %d metadata=%#v", i, m)
+		}
+	}
+	if got.Content.Parts[0].Text != `{"section":""}` || got.Content.Parts[1].Text+got.Content.Parts[2].Text != `{"section":"complete"}` {
+		t.Fatal("text changed")
 	}
 }

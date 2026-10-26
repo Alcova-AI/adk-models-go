@@ -113,9 +113,13 @@ func (s *streamState) convert(part protocol.StreamPart, includeThoughts bool) (*
 		}
 		return nil, false, nil
 	case "text-start":
-		s.startText(part.ID)
+		text := s.startText(part.ID)
+		attachTextMetadata(text, part.ID, part.ProviderMetadata)
 		return nil, false, nil
 	case "text-end":
+		if text := s.textParts[part.ID]; text != nil {
+			attachTextMetadata(text, part.ID, part.ProviderMetadata)
+		}
 		delete(s.textParts, part.ID)
 		return nil, false, nil
 	case "response-metadata":
@@ -128,7 +132,8 @@ func (s *streamState) convert(part protocol.StreamPart, includeThoughts bool) (*
 		}
 		text := s.startText(part.ID)
 		text.Text += part.Delta
-		return partial(&genai.Part{Text: part.Delta}), false, nil
+		attachTextMetadata(text, part.ID, part.ProviderMetadata)
+		return partial(&genai.Part{Text: part.Delta, PartMetadata: text.PartMetadata}), false, nil
 	case "reasoning-start":
 		s.reasoning[part.ID] = &strings.Builder{}
 		reasoningPart := &genai.Part{Thought: true}
