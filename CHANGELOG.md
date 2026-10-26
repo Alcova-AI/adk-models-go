@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.1.13] - Structured JSON extraction
 
 ### Added
 
