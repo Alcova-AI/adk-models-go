@@ -1,11 +1,26 @@
 package structuredoutput
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
+	adkmodels "github.com/Alcova-AI/adk-models-go"
+	adkanthropic "github.com/Alcova-AI/adk-models-go/anthropic"
 	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
+	adkopenai "github.com/Alcova-AI/adk-models-go/openai"
+	adkvercel "github.com/Alcova-AI/adk-models-go/vercel"
+	"github.com/anthropics/anthropic-sdk-go"
+	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
 
@@ -121,4 +136,134 @@ func TestTextCandidates(t *testing.T) {
 	if _, err := textCandidates(nil); err == nil {
 		t.Fatal("nil content accepted")
 	}
+}
+
+// TestStructuredOutputLiveMatrix sends at most 16 synthetic requests, with no SDK
+// retries and a per-request timeout. It tests real provider output through the
+// public extractor, not whether a provider happens to emit commentary on demand.
+// Run explicitly with ADK_STRUCTURED_LIVE=1 and all three provider credentials.
+func TestStructuredOutputLiveMatrix(t *testing.T) {
+	if os.Getenv("ADK_STRUCTURED_LIVE") != "1" {
+		t.Skip("set ADK_STRUCTURED_LIVE=1 for synthetic provider requests")
+	}
+	for _, key := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AI_GATEWAY_API_KEY"} {
+		if os.Getenv(key) == "" {
+			t.Fatalf("required credential %s is missing", key)
+		}
+	}
+	routes := []struct{ Name, Provider, Path, Model, Request string }{
+		{"openai-direct-responses", "openai", "direct", "gpt-5.6-luna", "gpt-5.6-luna"},
+		{"openai-direct-chat", "openai", "direct-chat", "gpt-5.6-luna", "gpt-5.6-luna"},
+		{"openai-vercel-responses", "openai", "vercel-openai", "gpt-5.6-luna", "openai/gpt-5.6-luna"},
+		{"openai-vercel-chat", "openai", "vercel-chat", "gpt-5.6-luna", "openai/gpt-5.6-luna"},
+		{"openai-vercel-native", "openai", "vercel-native", "gpt-5.6-luna", "openai/gpt-5.6-luna"},
+		{"anthropic-direct-messages", "anthropic", "direct", "claude-haiku-5-5", "claude-haiku-5-5"},
+		{"anthropic-vercel-messages", "anthropic", "vercel-anthropic", "claude-haiku-5-5", "anthropic/claude-haiku-5.5"},
+		{"anthropic-vercel-native", "anthropic", "vercel-native", "claude-haiku-5-5", "anthropic/claude-haiku-5.5"},
+	}
+	for _, route := range routes {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", route.Name, stream), func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+				defer cancel()
+				tr := &jsonLiveTransport{base: http.DefaultTransport}
+				mc := adkmodels.ModelConfig{CanonicalModel: route.Model, RequestModel: route.Request, DefaultMaxOutputTokens: 1024}
+				if route.Provider == "openai" {
+					mc.Reasoning.DefaultLevel = genai.ThinkingLevelMinimal
+				}
+				if route.Path == "vercel-native" || route.Path == "vercel-openai" || route.Path == "vercel-chat" || route.Path == "vercel-anthropic" {
+					mc.Vercel = &adkmodels.VercelConfig{Only: []string{route.Provider}, ZeroDataRetention: true}
+				}
+				var llm model.LLM
+				var err error
+				client := &http.Client{Transport: tr, Timeout: 60 * time.Second}
+				switch {
+				case route.Path == "vercel-native":
+					llm, err = adkvercel.NewModel(adkvercel.Config{APIKey: os.Getenv("AI_GATEWAY_API_KEY"), HTTPClient: client, Model: mc})
+				case route.Provider == "anthropic":
+					key, base := os.Getenv("ANTHROPIC_API_KEY"), "https://api.anthropic.com"
+					if route.Path == "vercel-anthropic" {
+						key, base = os.Getenv("AI_GATEWAY_API_KEY"), "https://ai-gateway.vercel.sh"
+					}
+					sdk := anthropic.NewClient(anthropicoption.WithAPIKey(key), anthropicoption.WithBaseURL(base), anthropicoption.WithHTTPClient(client), anthropicoption.WithMaxRetries(0))
+					llm, err = adkanthropic.NewModel(adkanthropic.Config{Client: sdk, Model: mc})
+				default:
+					key, base := os.Getenv("OPENAI_API_KEY"), "https://api.openai.com/v1"
+					if strings.HasPrefix(route.Path, "vercel-") {
+						key, base = os.Getenv("AI_GATEWAY_API_KEY"), "https://ai-gateway.vercel.sh/v1"
+					}
+					sdk := openai.NewClient(option.WithAPIKey(key), option.WithBaseURL(base), option.WithMaxRetries(0), option.WithHTTPClient(client))
+					api := adkopenai.APIResponses
+					if route.Path == "direct-chat" || route.Path == "vercel-chat" {
+						api = adkopenai.APIChatCompletions
+					}
+					llm, err = adkopenai.NewModel(adkopenai.Config{Client: sdk, API: api, Model: mc})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("Synthetic meeting: Jordan will send the review letter by 30 October 2026. The agreed decision is Cobalt Mango. Return only JSON with decision equal to Cobalt Mango and owner equal to Jordan.", genai.RoleUser)}, Config: &genai.GenerateContentConfig{MaxOutputTokens: 1024, ResponseSchema: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{"decision": {Type: genai.TypeString}, "owner": {Type: genai.TypeString}}, Required: []string{"decision", "owner"}}}}
+				var final *model.LLMResponse
+				partials := 0
+				for resp, err := range llm.GenerateContent(ctx, req, stream) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if resp != nil {
+						if resp.Partial {
+							partials++
+						} else {
+							final = resp
+						}
+					}
+				}
+				if final == nil || final.Content == nil || final.FinishReason != genai.FinishReasonStop {
+					t.Fatalf("missing successful final: %+v", final)
+				}
+				before, err := json.Marshal(final.Content)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := ExtractJSON[struct {
+					Decision string `json:"decision"`
+					Owner    string `json:"owner"`
+				}](final.Content)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Decision != "Cobalt Mango" || got.Owner != "Jordan" {
+					t.Fatalf("wrong extracted values: %+v", got)
+				}
+				after, err := json.Marshal(final.Content)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(before) != string(after) {
+					t.Fatal("extraction changed response")
+				}
+				if stream && partials == 0 {
+					t.Fatal("stream yielded no partial responses")
+				}
+				md, _ := adkmodels.MetadataFromResponse(final)
+				t.Logf("route=%s model=%s stream=%t partials=%d statuses=%v response_id=%s resolved_provider=%s extracted=%+v", route.Name, route.Request, stream, partials, tr.statuses, md.ResponseID, md.ResolvedProvider, got)
+				if mc.Vercel != nil && md.ResolvedProvider != "" && md.ResolvedProvider != route.Provider {
+					t.Fatalf("wrong gateway provider %s", md.ResolvedProvider)
+				}
+			})
+		}
+	}
+}
+
+// jsonLiveTransport records HTTP outcomes without changing request or response bodies.
+type jsonLiveTransport struct {
+	base     http.RoundTripper
+	statuses []int
+}
+
+func (t *jsonLiveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(req)
+	if response != nil {
+		t.statuses = append(t.statuses, response.StatusCode)
+	}
+	return response, err
 }
