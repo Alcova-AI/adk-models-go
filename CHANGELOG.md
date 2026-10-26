@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `structuredoutput.ExtractJSON[T]` for typed JSON extraction across adapters. Unphased output retains combined-text-first and individual-part fallbacks; each decode attempt starts with a fresh value.
+
+### Fixed
+
+- Preserve OpenAI Responses message IDs and phases in part metadata on direct and native Vercel routes, including streaming. Structured extraction selects one final-answer message and excludes commentary and thoughts, rejecting missing or ambiguous finals without falling back to drafts. Full response content and history remain unchanged.
+
 ## [v0.1.12] - Discovery catalogue changes
 
 ### Fixed
