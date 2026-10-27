@@ -72,7 +72,7 @@ func textCandidates(content *genai.Content) ([]string, error) {
 				continue
 			}
 			if m.Phase != converters.MessagePhaseFinalAnswer {
-				if part.Text == "" && m.Phase == "" {
+				if part.Text == "" && m.Phase == "" && m.ID == "" {
 					continue
 				}
 				return nil, fmt.Errorf("structured output contains text without a final-answer phase")

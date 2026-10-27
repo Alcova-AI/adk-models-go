@@ -725,3 +725,47 @@ func TestResponsePreservesMessagePhases(t *testing.T) {
 		t.Fatal("text changed")
 	}
 }
+
+func TestEmptyContentMessageMetadata(t *testing.T) {
+	for _, content := range []string{`,"content":[]`, `,"content":null`, ``} {
+		for _, metadata := range []string{`,"id":"m","phase":"final_answer"`, `,"id":"m"`, `,"phase":"final_answer"`, ``} {
+			raw := `{"status":"completed","output":[{"type":"message"` + metadata + content + `}]}`
+			var response responses.Response
+			if err := json.Unmarshal([]byte(raw), &response); err != nil {
+				t.Fatal(err)
+			}
+			result, err := ResponseToLLMResponse(&response, false)
+			if metadata == "" {
+				if !errors.Is(err, ErrNoTextOrToolContent) {
+					t.Fatalf("anonymous empty message manufactured content: result=%v err=%v", result, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Content.Parts) != 1 || result.Content.Parts[0].Text != "" {
+				t.Fatalf("empty message missing: %s", raw)
+			}
+			got, ok := MessageMetadataFromPart(result.Content.Parts[0])
+			if !ok {
+				t.Fatal("metadata missing")
+			}
+			expected := MessageMetadata{ID: response.Output[0].ID, Phase: string(response.Output[0].Phase)}
+			if got != expected {
+				t.Fatalf("metadata=%+v want%+v", got, expected)
+			}
+			input, err := ContentsToResponseInput([]*genai.Content{result.Content})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(input) != 1 || input[0].OfOutputMessage == nil {
+				t.Fatal("empty message lost during replay")
+			}
+			replay := input[0].OfOutputMessage
+			if replay.ID != expected.ID || string(replay.Phase) != expected.Phase || len(replay.Content) != 1 || replay.Content[0].OfOutputText.Text != "" {
+				t.Fatalf("replay changed: %#v", replay)
+			}
+		}
+	}
+}
