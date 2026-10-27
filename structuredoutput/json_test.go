@@ -675,9 +675,10 @@ func TestExtractJSONEmptyPhasesRoundTrip(t *testing.T) {
 										block["text"] = nil
 									case "empty-refusal", "missing-refusal", "null-refusal":
 										block = map[string]any{"type": "refusal"}
-										if representation == "empty-refusal" {
+										switch representation {
+										case "empty-refusal":
 											block["refusal"] = ""
-										} else if representation == "null-refusal" {
+										case "null-refusal":
 											block["refusal"] = nil
 										}
 									}
