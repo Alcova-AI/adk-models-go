@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
 	"math"
 	"strings"
 
@@ -63,7 +64,9 @@ func convertGenerateResult(result protocol.GenerateResult, includeThoughts bool)
 func convertOutputPart(output protocol.OutputPart, includeThoughts bool) (*genai.Part, error) {
 	switch output.Type {
 	case "text":
-		return &genai.Part{Text: output.Text}, nil
+		part := &genai.Part{Text: output.Text}
+		attachTextMetadata(part, output.ID, output.ProviderMetadata)
+		return part, nil
 	case "reasoning":
 		signature, err := encodeReasoningPart(output)
 		if err != nil {
@@ -173,4 +176,20 @@ func attachMetadata(response *model.LLMResponse, providerMetadata map[string]any
 		response.CustomMetadata = map[string]any{}
 	}
 	metadata.Attach(response, parsed)
+}
+
+// Only OpenAI currently supplies message phases on native text parts.
+func attachTextMetadata(part *genai.Part, id string, providers map[string]any) {
+	if fields, ok := providers["openai"].(map[string]any); ok {
+		value, _ := converters.MessageMetadataFromPart(part)
+		if itemID, ok := fields["itemId"].(string); ok && itemID != "" {
+			value.ID = itemID
+		} else if value.ID == "" {
+			value.ID = id
+		}
+		if phase, ok := fields["phase"].(string); ok && phase != "" {
+			value.Phase = phase
+		}
+		converters.SetMessageMetadata(part, value)
+	}
 }

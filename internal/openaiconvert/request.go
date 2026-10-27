@@ -128,12 +128,14 @@ func convertContents(contents []*genai.Content) (responses.ResponseInputParam, e
 		}
 		var messageContent responses.ResponseInputMessageContentListParam
 		var assistantText []string
+		var assistantMetadata MessageMetadata
 		flushMessage := func() {
 			if role == responses.EasyInputMessageRoleAssistant {
-				if message := newOutputMessage(assistantText); message != nil {
+				if message := newOutputMessage(assistantText, assistantMetadata); message != nil {
 					items = append(items, responses.ResponseInputItemUnionParam{OfOutputMessage: message})
 				}
 				assistantText = nil
+				assistantMetadata = MessageMetadata{}
 				return
 			}
 			if message := newInputMessage(role, messageContent); message != nil {
@@ -143,6 +145,7 @@ func convertContents(contents []*genai.Content) (responses.ResponseInputParam, e
 		}
 
 		for _, part := range content.Parts {
+			metadata, _ := MessageMetadataFromPart(part)
 			switch {
 			case part == nil:
 				continue
@@ -160,8 +163,13 @@ func convertContents(contents []*genai.Content) (responses.ResponseInputParam, e
 				// Unsigned thought text is display-only and must not become a user
 				// or assistant message when replaying history.
 				continue
-			case part.Text != "":
+			case part.Text != "" || (role == responses.EasyInputMessageRoleAssistant && metadata != (MessageMetadata{})):
 				if role == responses.EasyInputMessageRoleAssistant {
+					// Adjacent fragments belong together only within the same message.
+					if len(assistantText) > 0 && metadata != assistantMetadata {
+						flushMessage()
+					}
+					assistantMetadata = metadata
 					assistantText = append(assistantText, part.Text)
 				} else {
 					messageContent = append(messageContent, inputText(part.Text))
@@ -227,10 +235,11 @@ func newInputMessage(role responses.EasyInputMessageRole, content responses.Resp
 	}
 }
 
-func newOutputMessage(texts []string) *responses.ResponseOutputMessageParam {
+func newOutputMessage(texts []string, metadata MessageMetadata) *responses.ResponseOutputMessageParam {
 	var content []responses.ResponseOutputMessageContentUnionParam
 	for _, text := range texts {
-		if strings.TrimSpace(text) == "" {
+		// Metadata-bearing empty text still identifies an assistant message.
+		if strings.TrimSpace(text) == "" && metadata == (MessageMetadata{}) {
 			continue
 		}
 		content = append(content, responses.ResponseOutputMessageContentUnionParam{
@@ -240,7 +249,7 @@ func newOutputMessage(texts []string) *responses.ResponseOutputMessageParam {
 	if len(content) == 0 {
 		return nil
 	}
-	return &responses.ResponseOutputMessageParam{Content: content, Status: responses.ResponseOutputMessageStatusCompleted}
+	return &responses.ResponseOutputMessageParam{ID: metadata.ID, Phase: responses.ResponseOutputMessagePhase(metadata.Phase), Content: content, Status: responses.ResponseOutputMessageStatusCompleted}
 }
 
 func normalizeRole(role genai.Role) (responses.EasyInputMessageRole, error) {

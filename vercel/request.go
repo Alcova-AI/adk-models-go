@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Alcova-AI/adk-models-go/internal/family"
+	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
 
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -65,14 +66,17 @@ func convertContents(contents []*genai.Content) ([]protocol.Message, error) {
 			return nil, err
 		}
 		var parts []protocol.Part
+		var textMetadata converters.MessageMetadata
 		flush := func(messageRole string) {
 			if len(parts) == 0 {
 				return
 			}
 			messages = append(messages, protocol.Message{Role: messageRole, Content: parts})
 			parts = nil
+			textMetadata = converters.MessageMetadata{}
 		}
 		for _, part := range content.Parts {
+			metadata, _ := converters.MessageMetadataFromPart(part)
 			switch {
 			case part == nil:
 				continue
@@ -84,8 +88,31 @@ func convertContents(contents []*genai.Content) ([]protocol.Message, error) {
 				parts = append(parts, reasoning)
 			case part.Thought:
 				continue
-			case part.Text != "":
-				parts = append(parts, protocol.Part{Type: "text", Text: part.Text})
+			case part.Text != "" || (role == "assistant" && metadata != (converters.MessageMetadata{})):
+				text := protocol.Part{Type: "text", Text: part.Text}
+				if role == "assistant" {
+					if len(parts) > 0 && metadata != textMetadata {
+						flush(role)
+					}
+					textMetadata = metadata
+					options := map[string]any{}
+					if metadata.ID != "" {
+						options["itemId"] = metadata.ID
+					}
+					if metadata.Phase != "" {
+						options["phase"] = metadata.Phase
+					}
+					if len(options) > 0 {
+						text.ProviderOptions = protocol.ProviderOptions{"openai": options}
+					}
+				}
+				// The native OpenAI converter treats each text part as a message.
+				// Join adjacent fragments carrying the same original message identity.
+				if textMetadata.ID != "" && len(parts) > 0 && parts[len(parts)-1].Type == "text" {
+					parts[len(parts)-1].Text += text.Text
+				} else {
+					parts = append(parts, text)
+				}
 			case part.InlineData != nil:
 				file, err := inlineFile(part.InlineData)
 				if err != nil {

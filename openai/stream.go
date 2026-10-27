@@ -18,6 +18,7 @@ package adkopenai
 import (
 	"encoding/json"
 	"fmt"
+	converters "github.com/Alcova-AI/adk-models-go/internal/openaiconvert"
 	"strings"
 
 	"github.com/Alcova-AI/adk-models-go/internal/discovery"
@@ -28,6 +29,7 @@ import (
 // streamTranslator helps us process OpenAI streaming events by buffering
 // function arguments until a complete function call is received.
 type streamTranslator struct {
+	messages     map[string]converters.MessageMetadata
 	functionArgs map[string]*strings.Builder
 	itemToCallID map[string]string
 	itemToName   map[string]string
@@ -35,6 +37,7 @@ type streamTranslator struct {
 
 func newStreamTranslator() *streamTranslator {
 	return &streamTranslator{
+		messages:     make(map[string]converters.MessageMetadata),
 		functionArgs: make(map[string]*strings.Builder),
 		itemToCallID: make(map[string]string),
 		itemToName:   make(map[string]string),
@@ -51,7 +54,11 @@ func (t *streamTranslator) process(evt responses.ResponseStreamEventUnion) (*gen
 			return nil, nil
 		}
 		// For text deltas, we create a response with a single text part.
-		return singlePartResponse(&genai.Part{Text: delta.Delta}), nil
+		part := &genai.Part{Text: delta.Delta}
+		value := t.messages[delta.ItemID]
+		value.ID = delta.ItemID
+		converters.SetMessageMetadata(part, value)
+		return singlePartResponse(part), nil
 	case responseReasoningTextDelta:
 		delta := evt.AsResponseReasoningTextDelta()
 		if delta.Delta == "" {
@@ -94,6 +101,9 @@ func (t *streamTranslator) process(evt responses.ResponseStreamEventUnion) (*gen
 		return nil, fmt.Errorf("openai stream error")
 	case responseOutputItemAdded:
 		added := evt.AsResponseOutputItemAdded()
+		if added.Item.Type == "message" {
+			t.messages[added.Item.ID] = converters.MessageMetadata{ID: added.Item.ID, Phase: string(added.Item.Phase)}
+		}
 		if added.Item.ID != "" && added.Item.CallID != "" {
 			t.itemToCallID[added.Item.ID] = added.Item.CallID
 		}

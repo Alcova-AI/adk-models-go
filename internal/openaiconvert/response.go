@@ -138,14 +138,26 @@ func convertOutputItemsWithThoughts(items []responses.ResponseOutputItemUnion, i
 	for _, item := range items {
 		switch item.Type {
 		case "message":
+			messageMetadata := MessageMetadata{ID: item.ID, Phase: string(item.Phase)}
+			// An empty content list is still a message. Keep its identity so
+			// extraction can reject empty or ambiguous finals and replay retains it.
+			if len(item.Content) == 0 && messageMetadata != (MessageMetadata{}) {
+				part := &genai.Part{}
+				SetMessageMetadata(part, messageMetadata)
+				parts = append(parts, part)
+			}
 			for _, content := range item.Content {
 				switch content.Type {
 				case "output_text":
-					if content.Text != "" {
-						parts = append(parts, &genai.Part{Text: content.Text})
+					if content.Text != "" || item.ID != "" || item.Phase != "" {
+						part := &genai.Part{Text: content.Text}
+						SetMessageMetadata(part, messageMetadata)
+						parts = append(parts, part)
 					}
 				case "refusal":
-					parts = append(parts, &genai.Part{Text: content.Refusal})
+					part := &genai.Part{Text: content.Refusal}
+					SetMessageMetadata(part, messageMetadata)
+					parts = append(parts, part)
 				default:
 					return nil, fmt.Errorf("%w: %q", ErrUnsupportedMessageContentType, content.Type)
 				}
