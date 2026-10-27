@@ -125,3 +125,32 @@ func TestNativePhaseHistorySeparatesLegacyAndUserText(t *testing.T) {
 		t.Fatal("phase-only metadata lost")
 	}
 }
+
+func TestNativeEmptyMessageMetadata(t *testing.T) {
+	for _, metadata := range []converters.MessageMetadata{{Phase: "commentary"}, {ID: "msg_empty"}} {
+		part := &genai.Part{}
+		converters.SetMessageMetadata(part, metadata)
+		messages, err := convertContents([]*genai.Content{{Role: "model", Parts: []*genai.Part{part}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(messages) != 1 {
+			t.Fatalf("missing empty message: %#v", messages)
+		}
+		parts := messages[0].Content.([]protocol.Part)
+		if len(parts) != 1 || parts[0].Type != "text" || parts[0].Text != "" {
+			t.Fatalf("empty message changed: %#v", parts)
+		}
+		opts := parts[0].ProviderOptions["openai"]
+		if metadata.ID != "" && opts["itemId"] != metadata.ID {
+			t.Fatal("lost message ID")
+		}
+		if metadata.Phase != "" && opts["phase"] != metadata.Phase {
+			t.Fatal("lost phase")
+		}
+	}
+	_, err := convertContents([]*genai.Content{{Role: "model", Parts: []*genai.Part{{PartMetadata: map[string]any{"unrelated": true}}}}})
+	if err == nil {
+		t.Fatal("accepted an unsupported empty part")
+	}
+}

@@ -76,6 +76,7 @@ func convertContents(contents []*genai.Content) ([]protocol.Message, error) {
 			textMetadata = converters.MessageMetadata{}
 		}
 		for _, part := range content.Parts {
+			metadata, _ := converters.MessageMetadataFromPart(part)
 			switch {
 			case part == nil:
 				continue
@@ -87,10 +88,9 @@ func convertContents(contents []*genai.Content) ([]protocol.Message, error) {
 				parts = append(parts, reasoning)
 			case part.Thought:
 				continue
-			case part.Text != "":
+			case part.Text != "" || (role == "assistant" && metadata != (converters.MessageMetadata{})):
 				text := protocol.Part{Type: "text", Text: part.Text}
 				if role == "assistant" {
-					metadata, _ := converters.MessageMetadataFromPart(part)
 					if len(parts) > 0 && metadata != textMetadata {
 						flush(role)
 					}

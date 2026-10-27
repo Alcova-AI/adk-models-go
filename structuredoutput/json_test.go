@@ -328,6 +328,8 @@ func TestExtractJSONFinalMessageIdentity(t *testing.T) {
 
 // TestPhaseHistoryLiveReplay exercises real three-call tool conversations. The
 // model must emit its own commentary/final phases; the test never injects them.
+// ADK_PHASE_REPLAY_EMPTY_COMMENTARY=1 clears generated commentary text only in
+// the saved history fixture, to prove real endpoints accept empty phased replay.
 func TestPhaseHistoryLiveReplay(t *testing.T) {
 	if os.Getenv("ADK_PHASE_REPLAY_LIVE") != "1" {
 		t.Skip("set ADK_PHASE_REPLAY_LIVE=1 for live phase replay")
@@ -337,6 +339,7 @@ func TestPhaseHistoryLiveReplay(t *testing.T) {
 			t.Fatalf("missing %s", key)
 		}
 	}
+	emptyCommentary := os.Getenv("ADK_PHASE_REPLAY_EMPTY_COMMENTARY") == "1"
 	for _, route := range []string{"direct-responses", "vercel-responses", "vercel-native"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%t", route, stream), func(t *testing.T) {
@@ -408,6 +411,19 @@ func TestPhaseHistoryLiveReplay(t *testing.T) {
 					if e = json.Unmarshal(raw, restored); e != nil {
 						t.Fatal(e)
 					}
+					if turn == 0 && emptyCommentary {
+						cleared := 0
+						for _, part := range restored.Parts {
+							m, _ := converters.MessageMetadataFromPart(part)
+							if m.Phase == "commentary" {
+								part.Text = ""
+								cleared++
+							}
+						}
+						if cleared == 0 {
+							t.Fatal("no generated commentary to use for the empty replay fixture")
+						}
+					}
 					calls := []*genai.FunctionCall{}
 					for _, part := range restored.Parts {
 						if m, ok := converters.MessageMetadataFromPart(part); ok && m.Phase != "" {
@@ -463,7 +479,7 @@ func TestPhaseHistoryLiveReplay(t *testing.T) {
 					if err := os.MkdirAll(dir, 0700); err != nil {
 						t.Fatal(err)
 					}
-					data, err := json.MarshalIndent(map[string]any{"route": route, "stream": stream, "model": mc.RequestModel, "reasoning": "LOW", "phases": phases, "partials": partials, "calls": capture.calls, "history": history}, "", "  ")
+					data, err := json.MarshalIndent(map[string]any{"route": route, "stream": stream, "model": mc.RequestModel, "reasoning": "LOW", "empty_commentary_fixture": emptyCommentary, "phases": phases, "partials": partials, "calls": capture.calls, "history": history}, "", "  ")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -471,7 +487,7 @@ func TestPhaseHistoryLiveReplay(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				t.Logf("route=%s stream=%t real_calls=%d tool_results=1 replay_assertions=2 phases=%v partials=%v token_verified=true", route, stream, len(capture.calls), phases, partials)
+				t.Logf("route=%s stream=%t real_calls=%d tool_results=1 replay_assertions=2 empty_commentary_fixture=%t phases=%v partials=%v token_verified=true", route, stream, len(capture.calls), emptyCommentary, phases, partials)
 			})
 		}
 	}
@@ -523,11 +539,14 @@ func assertPhaseReplayWire(t *testing.T, raw []byte, history []*genai.Content, n
 			continue
 		}
 		for _, part := range content.Parts {
-			if part == nil || part.Thought || part.Text == "" {
+			if part == nil || part.Thought {
 				continue
 			}
-			m, _ := converters.MessageMetadataFromPart(part)
-			if m.ID == "" || m.Phase == "" {
+			m, ok := converters.MessageMetadataFromPart(part)
+			if part.Text == "" && !ok {
+				continue
+			}
+			if m.ID == "" {
 				t.Fatalf("cannot prove replay of unlabelled generated text: %#v", part)
 			}
 			if len(want) > 0 && want[len(want)-1].ID == m.ID && want[len(want)-1].Phase == m.Phase {
@@ -590,3 +609,152 @@ func assertPhaseReplayWire(t *testing.T, raw []byte, history []*genai.Content, n
 		t.Fatalf("history replay mismatch: got=%+v want=%+v", got, want)
 	}
 }
+
+// Empty phased messages must survive conversion, JSON persistence and replay,
+// even when the extractor rejects the response as empty or ambiguous.
+func TestExtractJSONEmptyPhasesRoundTrip(t *testing.T) {
+	type msg struct {
+		id, phase string
+		texts     []string
+	}
+	for _, tc := range []struct {
+		name     string
+		messages []msg
+		valid    bool
+	}{
+		{"empty commentary before final", []msg{{"c", "commentary", []string{""}}, {"f", "final_answer", []string{"1"}}}, true},
+		{"empty distinct second final", []msg{{"f", "final_answer", []string{"1"}}, {"f2", "final_answer", []string{""}}}, false},
+		{"unphased draft then empty final", []msg{{"draft", "", []string{"1"}}, {"f", "final_answer", []string{""}}}, false},
+		{"empty final only", []msg{{"f", "final_answer", []string{""}}}, false},
+		{"whitespace final", []msg{{"f", "final_answer", []string{" \n"}}}, false},
+		{"empty unphased message with ID", []msg{{"m", "", []string{""}}}, false},
+		{"empty commentary only", []msg{{"c", "commentary", []string{""}}}, false},
+		{"empty fragment of same final", []msg{{"f", "final_answer", []string{"1", ""}}}, true},
+	} {
+		for _, native := range []bool{false, true} {
+			for _, stream := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/native=%t/stream=%t", tc.name, native, stream), func(t *testing.T) {
+					var output, blocks []any
+					var events []string
+					for i, m := range tc.messages {
+						var content []any
+						for j, text := range m.texts {
+							content = append(content, map[string]any{"type": "output_text", "text": text, "annotations": []any{}})
+							metadata := map[string]any{"openai": map[string]any{"itemId": m.id, "phase": m.phase}}
+							blocks = append(blocks, map[string]any{"type": "text", "text": text, "providerMetadata": metadata})
+							textID := fmt.Sprintf("text_%d_%d", i, j)
+							start, _ := json.Marshal(map[string]any{"type": "text-start", "id": textID, "providerMetadata": metadata})
+							events = append(events, string(start))
+							if text != "" {
+								delta, _ := json.Marshal(map[string]any{"type": "text-delta", "id": textID, "delta": text})
+								events = append(events, string(delta))
+							}
+							end, _ := json.Marshal(map[string]any{"type": "text-end", "id": textID})
+							events = append(events, string(end))
+						}
+						output = append(output, map[string]any{"type": "message", "id": m.id, "phase": m.phase, "role": "assistant", "status": "completed", "content": content})
+					}
+					response := map[string]any{"id": "resp_empty", "status": "completed", "output": output}
+					raw, _ := json.Marshal(response)
+					if native {
+						raw, _ = json.Marshal(map[string]any{"content": blocks, "finishReason": map[string]any{"unified": "stop"}})
+					}
+					capture := &phaseReplayCapture{base: phaseFixtureTransport(func(r *http.Request) (*http.Response, error) {
+						body, contentType := string(raw), "application/json"
+						if stream {
+							contentType = "text/event-stream"
+							if native {
+								body = ""
+								for _, event := range events {
+									body += "data: " + event + "\n\n"
+								}
+								body += "data: {\"type\":\"finish\",\"finishReason\":{\"unified\":\"stop\"}}\n\n"
+							} else {
+								event, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 1, "response": response})
+								body = "event: response.completed\ndata: " + string(event) + "\n\n"
+							}
+						}
+						return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+					})}
+					client := &http.Client{Transport: capture}
+					mc := adkmodels.ModelConfig{CanonicalModel: "gpt-5.6-luna", RequestModel: "gpt-5.6-luna"}
+					var llm model.LLM
+					var err error
+					if native {
+						llm, err = adkvercel.NewModel(adkvercel.Config{APIKey: "synthetic", HTTPClient: client, Model: mc})
+					} else {
+						sdk := openai.NewClient(option.WithAPIKey("synthetic"), option.WithHTTPClient(client), option.WithMaxRetries(0))
+						llm, err = adkopenai.NewModel(adkopenai.Config{Client: sdk, Model: mc})
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					var final *genai.Content
+					for r, e := range llm.GenerateContent(t.Context(), &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("fixture", genai.RoleUser)}}, stream) {
+						if e != nil {
+							t.Fatal(e)
+						}
+						if r != nil && !r.Partial {
+							final = r.Content
+						}
+					}
+					if final == nil {
+						t.Fatal("no terminal content")
+					}
+					fragments := 0
+					for _, m := range tc.messages {
+						fragments += len(m.texts)
+					}
+					if len(final.Parts) != fragments {
+						t.Fatalf("lost message parts: got%d want%d", len(final.Parts), fragments)
+					}
+					index := 0
+					for _, original := range tc.messages {
+						for _, text := range original.texts {
+							part := final.Parts[index]
+							metadata, ok := converters.MessageMetadataFromPart(part)
+							if !ok || part.Text != text || metadata.ID != original.id || metadata.Phase != original.phase {
+								t.Fatalf("fragment %d changed: text=%q metadata=%+v; want text=%q id=%s phase=%s", index, part.Text, metadata, text, original.id, original.phase)
+							}
+							index++
+						}
+					}
+					data, err := json.Marshal(final)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var saved genai.Content
+					if err = json.Unmarshal(data, &saved); err != nil {
+						t.Fatal(err)
+					}
+					value, err := ExtractJSON[int](&saved)
+					if tc.valid {
+						if err != nil || value == nil || *value != 1 {
+							t.Fatalf("value=%v error=%v", value, err)
+						}
+					} else if err == nil {
+						t.Fatalf("accepted incomplete/ambiguous output: %s", data)
+					}
+					history := []*genai.Content{&saved, genai.NewContentFromText("continue", genai.RoleUser)}
+					for _, e := range llm.GenerateContent(t.Context(), &model.LLMRequest{Contents: history}, stream) {
+						if e != nil {
+							t.Fatal(e)
+						}
+					}
+					if len(capture.calls) != 2 {
+						t.Fatalf("replay made%d requests", len(capture.calls))
+					}
+					assertPhaseReplayWire(t, capture.calls[1].Request, history, native)
+					after, _ := json.Marshal(&saved)
+					if string(after) != string(data) {
+						t.Fatal("extraction/replay changed saved history")
+					}
+				})
+			}
+		}
+	}
+}
+
+type phaseFixtureTransport func(*http.Request) (*http.Response, error)
+
+func (f phaseFixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

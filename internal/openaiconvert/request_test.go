@@ -151,3 +151,26 @@ func TestContentsToResponseInputPhasesKeepReasoningAndToolOrder(t *testing.T) {
 		t.Fatal("tool linkage changed")
 	}
 }
+
+func TestContentsToResponseInputEmptyMessageMetadata(t *testing.T) {
+	for _, metadata := range []MessageMetadata{{Phase: "commentary"}, {ID: "msg_empty"}} {
+		part := &genai.Part{}
+		SetMessageMetadata(part, metadata)
+		input, err := ContentsToResponseInput([]*genai.Content{{Role: "model", Parts: []*genai.Part{part}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(input) != 1 || input[0].OfOutputMessage == nil {
+			t.Fatalf("missing empty message: %#v", input)
+		}
+		m := input[0].OfOutputMessage
+		if m.ID != metadata.ID || string(m.Phase) != metadata.Phase || len(m.Content) != 1 || m.Content[0].OfOutputText.Text != "" {
+			t.Fatalf("empty message changed: %#v", m)
+		}
+	}
+	// Unrelated metadata must not turn an unsupported empty part into a message.
+	_, err := ContentsToResponseInput([]*genai.Content{{Role: "model", Parts: []*genai.Part{{PartMetadata: map[string]any{"unrelated": true}}}}})
+	if err == nil {
+		t.Fatal("accepted an unsupported empty part")
+	}
+}

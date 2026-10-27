@@ -10,6 +10,7 @@
 
 - Preserve OpenAI message phases on direct Responses and native Vercel routes, including streaming, so structured extraction selects the final JSON answer rather than preliminary commentary.
 - Preserve assistant message boundaries, IDs and phases when replaying history to OpenAI Responses, directly and through Vercel.
+- Preserve empty assistant text messages with OpenAI metadata through response conversion and history replay, so empty finals cannot bypass validation or break the next turn.
 - Keep full response history and the existing text-selection fallback for responses without phase metadata.
 
 ## [v0.1.12] - Discovery catalogue changes

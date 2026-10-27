@@ -141,7 +141,7 @@ func convertOutputItemsWithThoughts(items []responses.ResponseOutputItemUnion, i
 			for _, content := range item.Content {
 				switch content.Type {
 				case "output_text":
-					if content.Text != "" {
+					if content.Text != "" || item.ID != "" || item.Phase != "" {
 						part := &genai.Part{Text: content.Text}
 						SetMessageMetadata(part, MessageMetadata{ID: item.ID, Phase: string(item.Phase)})
 						parts = append(parts, part)
