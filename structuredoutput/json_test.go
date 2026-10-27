@@ -638,7 +638,7 @@ func TestExtractJSONEmptyPhasesRoundTrip(t *testing.T) {
 		{"empty commentary only", []msg{{"c", "commentary", []string{""}}}, false},
 		{"empty fragment of same final", []msg{{"f", "final_answer", []string{"1", ""}}}, true},
 	} {
-		for _, representation := range []string{"empty-text", "missing-text", "null-text", "empty-content", "null-content", "omitted-content", "empty-refusal", "missing-refusal", "null-refusal"} {
+		for _, representation := range []string{"empty-text", "missing-text", "null-text", "empty-content", "null-content", "omitted-content", "empty-refusal", "missing-refusal", "null-refusal", "empty-delta-metadata", "missing-delta-metadata", "null-delta-metadata"} {
 			hasEmpty, fragments := false, false
 			for _, message := range tc.messages {
 				for _, text := range message.texts {
@@ -660,6 +660,9 @@ func TestExtractJSONEmptyPhasesRoundTrip(t *testing.T) {
 					continue
 				}
 				for _, stream := range []bool{false, true} {
+					if strings.HasSuffix(representation, "delta-metadata") && (!native || !stream) {
+						continue
+					}
 					t.Run(fmt.Sprintf("%s/%s/native=%t/stream=%t", tc.name, representation, native, stream), func(t *testing.T) {
 						var output, blocks []any
 						var events []string
@@ -694,13 +697,20 @@ func TestExtractJSONEmptyPhasesRoundTrip(t *testing.T) {
 								}
 								blocks = append(blocks, nativeBlock)
 								textID := fmt.Sprintf("text_%d_%d", i, j)
-								start, _ := json.Marshal(map[string]any{"type": "text-start", "id": textID, "providerMetadata": metadata})
+								startPart := map[string]any{"type": "text-start", "id": textID, "providerMetadata": metadata}
+								if text == "" && strings.HasSuffix(representation, "delta-metadata") {
+									delete(startPart, "providerMetadata")
+								}
+								start, _ := json.Marshal(startPart)
 								events = append(events, string(start))
 								deltaPart := map[string]any{"type": "text-delta", "id": textID, "delta": text}
-								if text == "" && representation == "missing-text" {
+								if text == "" && strings.HasSuffix(representation, "delta-metadata") {
+									deltaPart["providerMetadata"] = metadata
+								}
+								if text == "" && (representation == "missing-text" || representation == "missing-delta-metadata") {
 									delete(deltaPart, "delta")
 								}
-								if text == "" && representation == "null-text" {
+								if text == "" && (representation == "null-text" || representation == "null-delta-metadata") {
 									deltaPart["delta"] = nil
 								}
 								delta, _ := json.Marshal(deltaPart)
